@@ -20,14 +20,19 @@ interface TradingStore {
   watchlist: WatchlistItem[];
   positions: Position[];
   logs: { time: string; message: string; type: 'info' | 'success' | 'warning' }[];
+  autoTradingActive: boolean;
+  autoTradingInterval: number; // in seconds
   
   setBalance: (amount: number) => void;
   addWatchlist: (symbol: string) => void;
+  removeWatchlist: (symbol: string) => void;
   updatePrice: (symbol: string, price: number) => void;
   updateSignal: (symbol: string, signal: WatchlistItem['signal']) => void;
   toggleWatchlistActive: (symbol: string) => void;
   executeTrade: (symbol: string, action: 'BUY' | 'SELL', price: number, amount: number) => void;
   addLog: (message: string, type?: 'info' | 'success' | 'warning') => void;
+  setAutoTradingActive: (active: boolean) => void;
+  setAutoTradingInterval: (seconds: number) => void;
 }
 
 export const useTradingStore = create<TradingStore>((set) => ({
@@ -40,6 +45,8 @@ export const useTradingStore = create<TradingStore>((set) => ({
   ],
   positions: [],
   logs: [],
+  autoTradingActive: true,
+  autoTradingInterval: 30, // Default to 30 seconds for optimal live demonstration feedback
 
   setBalance: (amount) => set({ balance: amount, initialBalance: amount, positions: [], logs: [] }),
   
@@ -47,6 +54,10 @@ export const useTradingStore = create<TradingStore>((set) => ({
     if (state.watchlist.find(w => w.symbol === symbol)) return state;
     return { watchlist: [...state.watchlist, { symbol, price: null, signal: null, active: true }] };
   }),
+
+  removeWatchlist: (symbol) => set((state) => ({
+    watchlist: state.watchlist.filter(w => w.symbol !== symbol)
+  })),
 
   updatePrice: (symbol, price) => set((state) => ({
     watchlist: state.watchlist.map(w => w.symbol === symbol ? { ...w, price } : w),
@@ -95,5 +106,8 @@ export const useTradingStore = create<TradingStore>((set) => ({
 
   addLog: (message, type = 'info') => set((state) => ({
     logs: [{ time: new Date().toLocaleTimeString(), message, type }, ...state.logs]
-  }))
+  })),
+
+  setAutoTradingActive: (active) => set({ autoTradingActive: active }),
+  setAutoTradingInterval: (seconds) => set({ autoTradingInterval: seconds })
 }));

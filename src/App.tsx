@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ViewState } from './types';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
@@ -9,15 +9,79 @@ import { DataSources } from './components/DataSources';
 import { Alerts } from './components/Alerts';
 import { UserGuide } from './components/UserGuide';
 import { useTradingStore } from './store';
-import { requestNotificationPermission } from './services/notifications';
+import { requestNotificationPermission, sendWebPush } from './services/notifications';
+import { generateSignal } from './services/ml';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<ViewState>('dashboard');
-  const { setBalance } = useTradingStore();
+  const { 
+    balance, 
+    setBalance, 
+    autoTradingActive, 
+    autoTradingInterval, 
+    setAutoTradingActive, 
+    setAutoTradingInterval 
+  } = useTradingStore();
+
+  const [countdown, setCountdown] = useState(autoTradingInterval);
 
   const handleEnablePush = async () => {
     await requestNotificationPermission();
   };
+
+  // Tick countdown timer
+  useEffect(() => {
+    if (!autoTradingActive) return;
+
+    const timer = setInterval(() => {
+      setCountdown((prev) => prev - 1);
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [autoTradingActive]);
+
+  // Execute automatic calculations and trading on trigger
+  useEffect(() => {
+    if (!autoTradingActive) return;
+
+    if (countdown <= 0) {
+      // Trigger automatic inference & trading on the absolute freshest state
+      const state = useTradingStore.getState();
+      const activeItems = state.watchlist.filter(w => w.active);
+
+      if (activeItems.length > 0) {
+        state.addLog(`[Calcul Automat] Se rulează modelul de inferență ML automat...`, 'info');
+
+        activeItems.forEach((item) => {
+          if (!item.price) return;
+
+          const signal = generateSignal(item.symbol, item.price);
+          state.updateSignal(item.symbol, signal);
+
+          state.addLog(`[Calcul Automat] ${item.symbol}: Semnal ${signal.action} (${signal.prob}%)`, 'info');
+
+          if (signal.action === 'BUY' && signal.prob >= 60) {
+            const amountToBuy = parseFloat((1000 / item.price).toFixed(6));
+            state.executeTrade(item.symbol, 'BUY', item.price, amountToBuy);
+            sendWebPush('Semnal AI Automat: CUMPĂRĂ', `Activ: ${item.symbol}\nPreț: $${item.price}\nTranzacție virtuală automată executată.`);
+          } else if (signal.action === 'SELL' && signal.prob >= 60) {
+            const amountToSell = parseFloat((1000 / item.price).toFixed(6));
+            state.executeTrade(item.symbol, 'SELL', item.price, amountToSell);
+            sendWebPush('Semnal AI Automat: VÂNZARE', `Activ: ${item.symbol}\nPreț: $${item.price}\nTranzacție virtuală automată executată.`);
+          }
+        });
+      } else {
+        state.addLog(`[Calcul Automat] Nu există active setate ca "Activ" pentru calcul automat.`, 'warning');
+      }
+
+      setCountdown(autoTradingInterval);
+    }
+  }, [countdown, autoTradingActive, autoTradingInterval]);
+
+  // Reset countdown if interval configuration changes
+  useEffect(() => {
+    setCountdown(autoTradingInterval);
+  }, [autoTradingInterval]);
 
   return (
     <div className="flex h-screen w-full bg-[#050505] text-zinc-100 overflow-hidden font-sans">
@@ -44,10 +108,55 @@ export default function App() {
 
         {/* Placeholder for Settings */}
         {currentView === 'settings' && (
-          <div className="p-8 h-full flex flex-col items-start max-w-2xl mx-auto">
-            <h2 className="text-2xl font-serif text-zinc-100 mb-8">Platform Integration</h2>
+          <div className="p-8 h-full overflow-y-auto max-w-2xl mx-auto space-y-6">
+            <h2 className="text-2xl font-serif text-zinc-100">Setări Platformă</h2>
             
             <div className="w-full space-y-6">
+              {/* Auto-Trading Setup Card */}
+              <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-serif text-zinc-200">Automatizare Calcul (Auto-Trading AI)</h3>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-500">{autoTradingActive ? `Activ (ticking în ${countdown}s)` : 'Oprit'}</span>
+                    <button 
+                      onClick={() => setAutoTradingActive(!autoTradingActive)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${autoTradingActive ? 'bg-emerald-500' : 'bg-zinc-700'}`}>
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoTradingActive ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                </div>
+                
+                <p className="text-sm text-zinc-400 mb-6">
+                  Sistemul rulează modelele de Machine Learning local în browser la intervale regulate pentru a genera semnale și a efectua tranzacții automate pentru activele marcate ca <strong>"Activ"</strong>.
+                </p>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-2 font-sans">Interval Execuție Calcul</label>
+                    <div className="flex gap-2">
+                      {[
+                        { label: '15s', value: 15 },
+                        { label: '30s', value: 30 },
+                        { label: '1 min', value: 60 },
+                        { label: '5 min', value: 300 },
+                        { label: '15 min', value: 900 },
+                        { label: '1 oră', value: 3600 }
+                      ].map((item) => (
+                        <button
+                          key={item.value}
+                          onClick={() => {
+                            setAutoTradingInterval(item.value);
+                            setCountdown(item.value);
+                          }}
+                          className={`px-3 py-1.5 rounded text-xs font-mono border transition-all ${autoTradingInterval === item.value ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 font-bold' : 'bg-zinc-800/40 border-white/5 text-zinc-400 hover:text-zinc-200'}`}>
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-6">
                 <h3 className="text-lg font-serif text-zinc-200 mb-4">Paper Trading Setup</h3>
                 <p className="text-sm text-zinc-400 mb-4">Sistemul rulează 100% offline pentru execuție (fără API-uri de brokeri reali). Setările de mai jos definesc capitalul tău virtual de test.</p>

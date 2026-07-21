@@ -74,23 +74,21 @@ export function UserGuide() {
             
             <div className="space-y-8">
               <div>
-                <h3 className="font-serif text-lg text-emerald-400 mb-3">Rularea ca Aplicație Desktop (Electron)</h3>
+                <h3 className="font-serif text-lg text-emerald-400 mb-3">Rularea Locală pe Calculatorul Tău (Node.js & Vite)</h3>
                 <p className="text-sm text-zinc-400 font-sans leading-relaxed mb-3">
-                  Această aplicație a fost configurată automat să poată fi rulată ca o aplicație nativă de Desktop. Urmează acești pași pentru a o lansa local pe sistemul tău (Windows / macOS / Linux):
+                  Această aplicație este o platformă full-stack modernă construită cu React, Vite și un server Express rapid pentru servire robustă. Urmează acești pași simpli pentru a o lansa local pe sistemul tău:
                 </p>
                 <div className="bg-zinc-950 border border-white/10 rounded-lg p-5 font-mono text-sm text-zinc-300">
                   <ol className="list-decimal list-inside space-y-3">
                     <li>Exportă acest proiect (folosind butonul de Export/Share din meniul AI Studio, opțiunea <strong>Export to ZIP</strong> sau <strong>GitHub</strong>).</li>
-                    <li>Deschide folderul în terminalul tău.</li>
-                    <li>Rulează comanda pentru a instala dependențele:
+                    <li>Deschide folderul rezultat în terminalul tău favorit (e.g. VS Code, Terminal).</li>
+                    <li>Rulează comanda pentru a instala toate dependențele necesare:
                       <div className="bg-zinc-800 text-emerald-400 px-3 py-1.5 rounded mt-2 mb-1 w-max">npm install</div>
                     </li>
-                    <li>Pornește aplicația în mod Desktop:
-                      <div className="bg-zinc-800 text-emerald-400 px-3 py-1.5 rounded mt-2 mb-1 w-max">npm run electron:dev</div>
+                    <li>Pornește serverul de dezvoltare în mod local:
+                      <div className="bg-zinc-800 text-emerald-400 px-3 py-1.5 rounded mt-2 mb-1 w-max">npm run dev</div>
                     </li>
-                    <li className="text-zinc-500 pt-2 border-t border-white/5 mt-4">Opțional - pentru a genera un executabil (.exe / .dmg):
-                      <div className="bg-zinc-800 text-zinc-400 px-3 py-1.5 rounded mt-2 w-max">npm run electron:build</div>
-                    </li>
+                    <li>Deschide browserul la adresa indicată (implicit <code className="text-emerald-400">http://localhost:3000</code>).</li>
                   </ol>
                 </div>
               </div>

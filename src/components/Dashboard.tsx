@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useTradingStore } from '../store';
 import { fetchLivePrice } from '../services/api';
-import { ArrowUpRight, ArrowDownRight, Wallet, TrendingUp, AlertTriangle } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Wallet, TrendingUp, AlertTriangle, Trash2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -11,7 +11,7 @@ function cn(...inputs: (string | undefined | null | false)[]) {
 }
 
 export function Dashboard() {
-  const { balance, positions, watchlist, updatePrice, addWatchlist, toggleWatchlistActive } = useTradingStore();
+  const { balance, positions, watchlist, updatePrice, addWatchlist, toggleWatchlistActive, removeWatchlist } = useTradingStore();
   const [newSymbol, setNewSymbol] = useState('');
   
   const equity = balance + positions.reduce((acc, pos) => acc + (pos.amount * (pos.currentPrice || pos.entryPrice)), 0);
@@ -28,26 +28,23 @@ export function Dashboard() {
   ];
 
   useEffect(() => {
-    // Poll prices for active watchlist items every 5 seconds
-    const interval = setInterval(() => {
-      watchlist.filter(w => w.active).forEach(async (item) => {
+    const fetchAllPrices = async () => {
+      watchlist.forEach(async (item) => {
         const price = await fetchLivePrice(item.symbol);
         if (price) {
           updatePrice(item.symbol, price);
         }
       });
-    }, 5000);
+    };
     
     // Initial fetch
-    watchlist.filter(w => w.active).forEach(async (item) => {
-      const price = await fetchLivePrice(item.symbol);
-      if (price) {
-        updatePrice(item.symbol, price);
-      }
-    });
+    fetchAllPrices();
+
+    // Poll prices for all items in the watchlist every 5 seconds
+    const interval = setInterval(fetchAllPrices, 5000);
 
     return () => clearInterval(interval);
-  }, [watchlist, updatePrice]);
+  }, [watchlist.map(w => w.symbol).join(','), updatePrice]);
 
   const handleAddSymbol = () => {
     if (newSymbol.trim()) {
@@ -164,7 +161,7 @@ export function Dashboard() {
                     <th className="pb-3 font-medium">Activ (Binance)</th>
                     <th className="pb-3 font-medium">Preț Curent</th>
                     <th className="pb-3 font-medium text-right">Semnal AI (Local)</th>
-                    <th className="pb-3 font-medium text-right">Acțiune</th>
+                    <th className="pb-3 font-medium text-right">Acțiuni</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
@@ -176,11 +173,19 @@ export function Dashboard() {
                         {item.signal ? `${item.signal.action} (${item.signal.prob}%)` : '-'}
                       </td>
                       <td className="py-3 text-right">
-                        <button 
-                          onClick={() => toggleWatchlistActive(item.symbol)}
-                          className={`px-3 py-1 text-xs transition-colors rounded border ${item.active ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-white/5 hover:bg-white/10 text-white border-white/5'}`}>
-                          {item.active ? 'Activ' : 'Urmărește'}
-                        </button>
+                        <div className="flex items-center justify-end gap-2">
+                          <button 
+                            onClick={() => toggleWatchlistActive(item.symbol)}
+                            className={`px-3 py-1 text-xs transition-colors rounded border ${item.active ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 font-bold' : 'bg-white/5 hover:bg-white/10 text-white border-white/5'}`}>
+                            {item.active ? 'Activ' : 'Urmărește'}
+                          </button>
+                          <button 
+                            onClick={() => removeWatchlist(item.symbol)}
+                            className="p-1 text-zinc-500 hover:text-rose-400 transition-colors rounded hover:bg-white/5"
+                            title="Elimină activ">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
