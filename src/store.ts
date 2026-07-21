@@ -1,0 +1,99 @@
+import { create } from 'zustand';
+
+export interface WatchlistItem {
+  symbol: string;
+  price: number | null;
+  signal: { action: 'BUY' | 'SELL' | 'HOLD'; prob: number } | null;
+  active: boolean;
+}
+
+export interface Position {
+  symbol: string;
+  amount: number;
+  entryPrice: number;
+  currentPrice: number;
+}
+
+interface TradingStore {
+  balance: number;
+  initialBalance: number;
+  watchlist: WatchlistItem[];
+  positions: Position[];
+  logs: { time: string; message: string; type: 'info' | 'success' | 'warning' }[];
+  
+  setBalance: (amount: number) => void;
+  addWatchlist: (symbol: string) => void;
+  updatePrice: (symbol: string, price: number) => void;
+  updateSignal: (symbol: string, signal: WatchlistItem['signal']) => void;
+  toggleWatchlistActive: (symbol: string) => void;
+  executeTrade: (symbol: string, action: 'BUY' | 'SELL', price: number, amount: number) => void;
+  addLog: (message: string, type?: 'info' | 'success' | 'warning') => void;
+}
+
+export const useTradingStore = create<TradingStore>((set) => ({
+  balance: 10000,
+  initialBalance: 10000,
+  watchlist: [
+    { symbol: 'BTCUSDT', price: null, signal: null, active: true },
+    { symbol: 'ETHUSDT', price: null, signal: null, active: false },
+    { symbol: 'SOLUSDT', price: null, signal: null, active: false },
+  ],
+  positions: [],
+  logs: [],
+
+  setBalance: (amount) => set({ balance: amount, initialBalance: amount, positions: [], logs: [] }),
+  
+  addWatchlist: (symbol) => set((state) => {
+    if (state.watchlist.find(w => w.symbol === symbol)) return state;
+    return { watchlist: [...state.watchlist, { symbol, price: null, signal: null, active: true }] };
+  }),
+
+  updatePrice: (symbol, price) => set((state) => ({
+    watchlist: state.watchlist.map(w => w.symbol === symbol ? { ...w, price } : w),
+    positions: state.positions.map(p => p.symbol === symbol ? { ...p, currentPrice: price } : p)
+  })),
+
+  updateSignal: (symbol, signal) => set((state) => ({
+    watchlist: state.watchlist.map(w => w.symbol === symbol ? { ...w, signal } : w)
+  })),
+
+  toggleWatchlistActive: (symbol) => set((state) => ({
+    watchlist: state.watchlist.map(w => w.symbol === symbol ? { ...w, active: !w.active } : w)
+  })),
+
+  executeTrade: (symbol, action, price, amount) => set((state) => {
+    // Simplified paper trading execution
+    const cost = price * amount;
+    if (action === 'BUY' && state.balance >= cost) {
+      const existing = state.positions.find(p => p.symbol === symbol);
+      let newPositions = [...state.positions];
+      if (existing) {
+        newPositions = state.positions.map(p => p.symbol === symbol ? { ...p, amount: p.amount + amount, currentPrice: price } : p);
+      } else {
+        newPositions.push({ symbol, amount, entryPrice: price, currentPrice: price });
+      }
+      return { 
+        balance: state.balance - cost, 
+        positions: newPositions,
+        logs: [{ time: new Date().toLocaleTimeString(), message: `Cumpărat ${amount} ${symbol} @ $${price}`, type: 'success' }, ...state.logs]
+      };
+    } else if (action === 'SELL') {
+      const existing = state.positions.find(p => p.symbol === symbol);
+      if (existing && existing.amount >= amount) {
+        const newPositions = state.positions.map(p => 
+          p.symbol === symbol ? { ...p, amount: p.amount - amount } : p
+        ).filter(p => p.amount > 0);
+        return {
+          balance: state.balance + cost,
+          positions: newPositions,
+          logs: [{ time: new Date().toLocaleTimeString(), message: `Vândut ${amount} ${symbol} @ $${price}`, type: 'warning' }, ...state.logs]
+        };
+      }
+    }
+    return state;
+  }),
+
+  addLog: (message, type = 'info') => set((state) => ({
+    logs: [{ time: new Date().toLocaleTimeString(), message, type }, ...state.logs]
+  }))
+}));
