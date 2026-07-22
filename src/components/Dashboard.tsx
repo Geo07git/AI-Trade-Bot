@@ -89,11 +89,6 @@ export function Dashboard() {
     
     // Initial fetch
     fetchAllPrices();
-
-    // Poll prices for all items in the watchlist every 5 seconds
-    const interval = setInterval(fetchAllPrices, 5000);
-
-    return () => clearInterval(interval);
   }, [watchlist.map(w => w.symbol).join(','), updatePrice]);
 
   const handleAddSymbol = () => {

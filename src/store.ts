@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 export interface WatchlistItem {
   symbol: string;
@@ -21,7 +22,10 @@ interface TradingStore {
   positions: Position[];
   logs: { time: string; message: string; type: 'info' | 'success' | 'warning'; equity?: number }[];
   autoTradingActive: boolean;
-  autoTradingInterval: number; // in seconds
+  dataInterval: number;
+  analysisInterval: number;
+  apiKey: string;
+  apiSecret: string;
   
   setBalance: (amount: number) => void;
   addWatchlist: (symbol: string) => void;
@@ -32,10 +36,15 @@ interface TradingStore {
   executeTrade: (symbol: string, action: 'BUY' | 'SELL', price: number, amount: number) => void;
   addLog: (message: string, type?: 'info' | 'success' | 'warning') => void;
   setAutoTradingActive: (active: boolean) => void;
-  setAutoTradingInterval: (seconds: number) => void;
+  setDataInterval: (seconds: number) => void;
+  setAnalysisInterval: (seconds: number) => void;
+  setApiKey: (key: string) => void;
+  setApiSecret: (secret: string) => void;
 }
 
-export const useTradingStore = create<TradingStore>((set) => ({
+export const useTradingStore = create<TradingStore>()(
+  persist(
+    (set) => ({
   balance: 10000,
   initialBalance: 10000,
   watchlist: [
@@ -46,8 +55,11 @@ export const useTradingStore = create<TradingStore>((set) => ({
   positions: [],
   logs: [],
   autoTradingActive: true,
-  autoTradingInterval: 30, // Default to 30 seconds for optimal live demonstration feedback
-
+  dataInterval: 30, // 30 seconds
+  analysisInterval: 60, // 1 minute
+  apiKey: '',
+  apiSecret: '',
+  
   setBalance: (amount) => set({ balance: amount, initialBalance: amount, positions: [], logs: [] }),
   
   addWatchlist: (symbol) => set((state) => {
@@ -117,5 +129,13 @@ export const useTradingStore = create<TradingStore>((set) => ({
   })),
 
   setAutoTradingActive: (active) => set({ autoTradingActive: active }),
-  setAutoTradingInterval: (seconds) => set({ autoTradingInterval: seconds })
-}));
+  setDataInterval: (seconds) => set({ dataInterval: seconds }),
+  setAnalysisInterval: (seconds) => set({ analysisInterval: seconds }),
+  setApiKey: (key) => set({ apiKey: key }),
+  setApiSecret: (secret) => set({ apiSecret: secret })
+    }),
+    {
+      name: 'trading-store'
+    }
+  )
+);
