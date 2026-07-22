@@ -11,7 +11,7 @@ function cn(...inputs: (string | undefined | null | false)[]) {
 }
 
 export function Dashboard() {
-  const { balance, positions, watchlist, updatePrice, addWatchlist, toggleWatchlistActive, removeWatchlist } = useTradingStore();
+  const { balance, positions, watchlist, updatePrice, addWatchlist, toggleWatchlistActive, removeWatchlist, autoTradingActive, setAutoTradingActive } = useTradingStore();
   const [newSymbol, setNewSymbol] = useState('');
   
   const [activeChartId, setActiveChartId] = useState('PORTFOLIO');
@@ -100,25 +100,37 @@ export function Dashboard() {
 
   return (
     <div className="flex flex-col h-full">
-      <header className="h-20 border-b border-white/5 flex items-center justify-between px-8 bg-zinc-900/10 backdrop-blur-md shrink-0">
-        <div className="flex gap-12">
+      <header className="min-h-20 border-b border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between px-4 sm:px-8 py-3 md:py-0 bg-zinc-900/10 backdrop-blur-md shrink-0 gap-3">
+        <div className="flex flex-wrap items-center gap-4 sm:gap-8 w-full md:w-auto">
           <div>
-            <p className="text-[10px] uppercase text-zinc-500 tracking-wider mb-0.5">Capital Virtual (Paper Trading)</p>
-            <p className="font-serif text-xl font-medium">${equity.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} <span className={cn("text-sm font-sans ml-1", dayChangePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>{dayChangePercent >= 0 ? '+' : ''}{dayChangePercent.toFixed(2)}%</span></p>
+            <p className="text-[10px] uppercase text-zinc-500 tracking-wider mb-0.5">Capital Virtual</p>
+            <p className="font-serif text-lg sm:text-xl font-medium">${equity.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} <span className={cn("text-xs sm:text-sm font-sans ml-1", dayChangePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>{dayChangePercent >= 0 ? '+' : ''}{dayChangePercent.toFixed(2)}%</span></p>
           </div>
           <div>
-            <p className="text-[10px] uppercase text-zinc-500 tracking-wider mb-0.5">Profit Virtual Generat</p>
-            <p className={cn("font-serif text-xl font-medium", dayChange >= 0 ? "text-emerald-400" : "text-rose-400")}>{dayChange >= 0 ? '+' : ''}${dayChange.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+            <p className="text-[10px] uppercase text-zinc-500 tracking-wider mb-0.5">Profit Virtual</p>
+            <p className={cn("font-serif text-lg sm:text-xl font-medium", dayChange >= 0 ? "text-emerald-400" : "text-rose-400")}>{dayChange >= 0 ? '+' : ''}${dayChange.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
           </div>
           <div>
             <p className="text-[10px] uppercase text-zinc-500 tracking-wider mb-0.5">Cash Disponibil</p>
-            <p className="font-serif text-xl font-medium">${balance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+            <p className="font-serif text-lg sm:text-xl font-medium">${balance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
           </div>
         </div>
         
-        <div className="flex items-center gap-4">
-          <div className="px-4 py-1.5 border border-white/10 rounded-full text-xs">Sursă Date: <span className="text-emerald-400">Binance API</span></div>
-          <div className="w-10 h-10 rounded-full border border-white/20 bg-zinc-800 flex items-center justify-center text-xs">JD</div>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4 w-full md:w-auto justify-between md:justify-end">
+          <button 
+            onClick={() => setAutoTradingActive(!autoTradingActive)}
+            className={cn(
+              "flex items-center gap-2 px-3 sm:px-4 py-2 rounded-full text-xs font-semibold transition-all cursor-pointer border shadow-sm shrink-0",
+              autoTradingActive 
+                ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/20" 
+                : "bg-rose-500/10 border-rose-500/40 text-rose-400 hover:bg-rose-500/20"
+            )}
+            title="Apasă pentru a porni sau opri motorul de tranzacționare de pe server"
+          >
+            <span className={cn("w-2 h-2 rounded-full", autoTradingActive ? "bg-emerald-400 animate-pulse" : "bg-rose-500")}></span>
+            {autoTradingActive ? "Server 24/7: ACTIV (Stop)" : "Server 24/7: OPRIT (Start)"}
+          </button>
+          <div className="px-3 py-1.5 border border-white/10 rounded-full text-[11px] sm:text-xs text-zinc-400">Binance API</div>
         </div>
       </header>
 

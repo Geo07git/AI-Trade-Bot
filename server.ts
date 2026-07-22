@@ -2,12 +2,41 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+import { botEngine } from './server/bot';
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
+
+  // Background 24/7 Bot API Endpoints
+  app.get('/api/bot/state', (req, res) => {
+    res.json({
+      ...botEngine.state,
+      calculatedEquity: botEngine.calculateEquity()
+    });
+  });
+
+  app.post('/api/bot/config', (req, res) => {
+    botEngine.updateConfig(req.body);
+    res.json({ success: true, state: botEngine.state });
+  });
+
+  app.post('/api/bot/reset', (req, res) => {
+    const { balance } = req.body;
+    botEngine.resetPortfolio(balance || 10000);
+    res.json({ success: true, state: botEngine.state });
+  });
+
+  app.post('/api/bot/trade', (req, res) => {
+    const { symbol, action, price, amount } = req.body;
+    if (symbol && action && price && amount) {
+      botEngine.executeTrade(symbol, action, price, amount);
+      return res.json({ success: true, state: botEngine.state });
+    }
+    res.status(400).json({ error: 'Missing parameters' });
+  });
 
   // API Route for AI Analysis
   app.post('/api/analyze', async (req, res) => {
