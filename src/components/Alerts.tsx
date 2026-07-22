@@ -1,17 +1,23 @@
 import React from 'react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { requestNotificationPermission, sendWebPush } from '../services/notifications';
+import { requestNotificationPermission, sendWebPush, sendWebhookMessage } from '../services/notifications';
+import { useTradingStore } from '../store';
 
 function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
 }
 
 export function Alerts() {
-  const handleTestPush = async () => {
+  const webhookUrl = useTradingStore(state => state.webhookUrl);
+
+  const handleTestAlerts = async () => {
     const granted = await requestNotificationPermission();
     if (granted) {
       sendWebPush('Test Notificare AI', 'Sistemul de notificări desktop este activat. Vei primi semnalele de tranzacționare direct aici.');
+    }
+    if (webhookUrl) {
+      await sendWebhookMessage(webhookUrl, '🔔 **Test Notificare AI**\nSistemul de notificări Webhook funcționează corect. Vei primi semnalele aici.');
     }
   };
 
@@ -20,12 +26,12 @@ export function Alerts() {
       <header className="h-20 border-b border-white/5 flex items-center justify-between px-8 bg-zinc-900/10 backdrop-blur-md shrink-0">
         <div>
           <h1 className="font-serif text-xl text-white">Notificări & Alerte</h1>
-          <p className="text-[10px] uppercase text-zinc-500 tracking-wider mt-0.5">Semnale trimise prin Web Push (Browser) și Gmail API</p>
+          <p className="text-[10px] uppercase text-zinc-500 tracking-wider mt-0.5">Semnale trimise prin Web Push (Browser) și Webhooks</p>
         </div>
         <button 
-          onClick={handleTestPush}
+          onClick={handleTestAlerts}
           className="px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 font-medium rounded-md transition-colors text-sm border border-emerald-500/20">
-          Testează Push Notification
+          Testează Alertele (Push & Webhook)
         </button>
       </header>
 
@@ -39,7 +45,7 @@ export function Alerts() {
                  <h3 className="font-serif text-lg text-white">Semnal de Tranzacționare XGBoost</h3>
                </div>
                <div className="flex items-center gap-2">
-                 <span className="px-2 py-1 bg-[#ea4335]/20 border border-[#ea4335]/50 text-[#ea4335] rounded text-[10px] font-bold">Gmail</span>
+                 <span className="px-2 py-1 bg-blue-500/20 border border-blue-500/50 text-blue-400 rounded text-[10px] font-bold">Telegram</span>
                  <span className="px-2 py-1 bg-white/10 border border-white/20 text-white rounded text-[10px] font-bold">Web Push</span>
                </div>
             </div>
@@ -48,7 +54,7 @@ export function Alerts() {
                <span className="text-zinc-500">&gt;=</span>
                <span className="px-3 py-1.5 bg-zinc-800/80 rounded-lg border border-white/5 text-emerald-400">90%</span>
                <span className="text-zinc-500">ATUNCI</span>
-               <span className="px-3 py-1.5 bg-zinc-800/80 rounded-lg border border-white/5 text-emerald-400">Notifică Desktop/Telefon</span>
+               <span className="px-3 py-1.5 bg-zinc-800/80 rounded-lg border border-white/5 text-emerald-400">Notifică Desktop/Telegram</span>
             </div>
           </div>
 
@@ -59,7 +65,7 @@ export function Alerts() {
                  <h3 className="font-serif text-lg text-white">Raport Profit Paper Trading</h3>
                </div>
                <div className="flex items-center gap-2">
-                 <span className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] text-zinc-400">Email</span>
+                 <span className="px-2 py-1 bg-indigo-500/20 border border-indigo-500/50 text-indigo-400 rounded text-[10px] font-bold">Discord Webhook</span>
                  <span className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] text-zinc-400">Push Android</span>
                </div>
             </div>
@@ -79,7 +85,7 @@ export function Alerts() {
                  <h3 className="font-serif text-lg text-white">Macro Event Volatility Spike</h3>
                </div>
                <div className="flex items-center gap-2">
-                 <span className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] text-zinc-400">Email</span>
+                 <span className="px-2 py-1 bg-white/10 border border-white/20 text-white rounded text-[10px] font-bold">Web Push</span>
                </div>
             </div>
              <div className="flex items-center gap-4 text-sm font-mono text-zinc-300 flex-wrap">
@@ -90,7 +96,6 @@ export function Alerts() {
                <span className="px-3 py-1.5 bg-zinc-800/80 rounded-lg border border-white/5 text-emerald-400">Pause Auto-Trading & Notify</span>
             </div>
           </div>
-
         </div>
       </div>
     </div>

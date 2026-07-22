@@ -94,10 +94,11 @@ Current Open Positions:
 ${portfolio.join('\n') || 'None'}
 `;
       
+      const geminiApiKey = useTradingStore.getState().geminiApiKey;
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: userMsg, context })
+        body: JSON.stringify({ prompt: userMsg, context, geminiApiKey })
       });
 
       const data = await res.json();

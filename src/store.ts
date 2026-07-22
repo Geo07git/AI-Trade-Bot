@@ -26,6 +26,8 @@ interface TradingStore {
   analysisInterval: number;
   apiKey: string;
   apiSecret: string;
+  geminiApiKey: string;
+  webhookUrl: string;
   
   setBalance: (amount: number) => void;
   addWatchlist: (symbol: string) => void;
@@ -40,6 +42,8 @@ interface TradingStore {
   setAnalysisInterval: (seconds: number) => void;
   setApiKey: (key: string) => void;
   setApiSecret: (secret: string) => void;
+  setGeminiApiKey: (key: string) => void;
+  setWebhookUrl: (url: string) => void;
 }
 
 export const useTradingStore = create<TradingStore>()(
@@ -59,6 +63,8 @@ export const useTradingStore = create<TradingStore>()(
   analysisInterval: 60, // 1 minute
   apiKey: '',
   apiSecret: '',
+  geminiApiKey: '',
+  webhookUrl: '',
   
   setBalance: (amount) => set({ balance: amount, initialBalance: amount, positions: [], logs: [] }),
   
@@ -132,7 +138,9 @@ export const useTradingStore = create<TradingStore>()(
   setDataInterval: (seconds) => set({ dataInterval: seconds }),
   setAnalysisInterval: (seconds) => set({ analysisInterval: seconds }),
   setApiKey: (key) => set({ apiKey: key }),
-  setApiSecret: (secret) => set({ apiSecret: secret })
+  setApiSecret: (secret) => set({ apiSecret: secret }),
+  setGeminiApiKey: (key) => set({ geminiApiKey: key }),
+  setWebhookUrl: (url) => set({ webhookUrl: url })
     }),
     {
       name: 'trading-store'

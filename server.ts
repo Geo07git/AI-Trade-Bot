@@ -12,8 +12,8 @@ async function startServer() {
   // API Route for AI Analysis
   app.post('/api/analyze', async (req, res) => {
     try {
-      const { prompt, context } = req.body;
-      const apiKey = process.env.GEMINI_API_KEY;
+      const { prompt, context, geminiApiKey } = req.body;
+      const apiKey = geminiApiKey || process.env.GEMINI_API_KEY;
       if (!apiKey) {
         return res.status(400).json({ error: 'Missing API key. Configure it in Settings.' });
       }

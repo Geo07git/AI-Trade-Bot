@@ -10,7 +10,7 @@ import { UserGuide } from './components/UserGuide';
 import { Backtesting } from './components/Backtesting';
 import { Settings } from './components/Settings';
 import { useTradingStore } from './store';
-import { sendWebPush } from './services/notifications';
+import { sendWebPush, sendWebhookMessage } from './services/notifications';
 import { generateSignal } from './services/ml';
 import { fetchLivePrice } from './services/api';
 
@@ -23,7 +23,8 @@ export default function App() {
     dataInterval,
     analysisInterval, 
     setAutoTradingActive, 
-    updatePrice
+    updatePrice,
+    webhookUrl
   } = useTradingStore();
 
   const [dataCountdown, setDataCountdown] = useState(dataInterval);
@@ -61,10 +62,12 @@ export default function App() {
                   state.executeTrade(item.symbol, 'SELL', price, position.amount);
                   state.addLog(`[Stop Loss] Ieșire din ${item.symbol} la prețul de ${price} ($${(price * position.amount).toFixed(2)})`, 'warning');
                   sendWebPush('Stop Loss Executat', `Activ: ${item.symbol}\nPreț: $${price}\nMotiv: PNL a atins -5%`);
+                  if (webhookUrl) sendWebhookMessage(webhookUrl, `🚨 **Stop Loss Executat**\nActiv: ${item.symbol}\nPreț: $${price}\nMotiv: PNL a atins -5%`);
                 } else if (pnlPercent >= 10) {
                   state.executeTrade(item.symbol, 'SELL', price, position.amount);
                   state.addLog(`[Take Profit] Ieșire din ${item.symbol} la prețul de ${price} ($${(price * position.amount).toFixed(2)})`, 'success');
                   sendWebPush('Take Profit Executat', `Activ: ${item.symbol}\nPreț: $${price}\nMotiv: PNL a atins +10%`);
+                  if (webhookUrl) sendWebhookMessage(webhookUrl, `✅ **Take Profit Executat**\nActiv: ${item.symbol}\nPreț: $${price}\nMotiv: PNL a atins +10%`);
                 }
               }
             }
@@ -104,12 +107,14 @@ export default function App() {
               state.addLog(`[Calcul Automat] ${item.symbol}: Semnal ${signal.action} (${signal.prob}% probabilitate). Executăm intrare.`, 'info');
               state.executeTrade(item.symbol, 'BUY', item.price, amountToBuy);
               sendWebPush('Semnal AI Automat: CUMPĂRĂ', `Activ: ${item.symbol}\nPreț: $${item.price}`);
+              if (webhookUrl) sendWebhookMessage(webhookUrl, `🟢 **Semnal AI Automat: CUMPĂRĂ**\nActiv: ${item.symbol}\nPreț: $${item.price}`);
             }
           } else if (signal.action === 'SELL' && signal.prob >= 60) {
             if (isHolding) {
               state.addLog(`[Calcul Automat] ${item.symbol}: Semnal ${signal.action} (${signal.prob}% probabilitate). Executăm ieșire.`, 'info');
               state.executeTrade(item.symbol, 'SELL', item.price, position.amount);
               sendWebPush('Semnal AI Automat: VÂNZARE', `Activ: ${item.symbol}\nPreț: $${item.price}`);
+              if (webhookUrl) sendWebhookMessage(webhookUrl, `🔴 **Semnal AI Automat: VÂNZARE**\nActiv: ${item.symbol}\nPreț: $${item.price}`);
             }
           }
         });

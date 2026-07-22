@@ -14,7 +14,11 @@ export function Settings() {
     apiKey,
     apiSecret,
     setApiKey,
-    setApiSecret
+    setApiSecret,
+    geminiApiKey,
+    setGeminiApiKey,
+    webhookUrl,
+    setWebhookUrl
   } = useTradingStore();
 
   const handleEnablePush = async () => {
@@ -114,6 +118,40 @@ export function Settings() {
                 value={apiSecret}
                 onChange={(e) => setApiSecret(e.target.value)}
                 placeholder="Introdu API Secret..." 
+                className="w-full bg-zinc-800/40 border border-white/5 rounded-lg px-4 py-2 text-zinc-100 focus:outline-none focus:border-white/20 font-mono text-sm" 
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-6">
+          <h3 className="text-lg font-serif text-zinc-200 mb-4">Google Gemini (AI Analyst)</h3>
+          <p className="text-sm text-zinc-400 mb-4">Introdu propria ta cheie API Gemini pentru a debloca capabilitățile AI Analyst. Cheia este stocată local și folosită pentru a genera rapoarte și semnale.</p>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-1 font-sans">Gemini API Key</label>
+              <input 
+                type="password" 
+                value={geminiApiKey}
+                onChange={(e) => setGeminiApiKey(e.target.value)}
+                placeholder="AIzaSy..." 
+                className="w-full bg-zinc-800/40 border border-white/5 rounded-lg px-4 py-2 text-zinc-100 focus:outline-none focus:border-white/20 font-mono text-sm" 
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-6">
+          <h3 className="text-lg font-serif text-zinc-200 mb-4">Webhooks (Discord / Telegram)</h3>
+          <p className="text-sm text-zinc-400 mb-4">Primește semnalele de tranzacționare direct pe telefon via Discord sau Telegram. Introdu URL-ul de webhook generat de platforma aleasă.</p>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-1 font-sans">Webhook URL</label>
+              <input 
+                type="text" 
+                value={webhookUrl}
+                onChange={(e) => setWebhookUrl(e.target.value)}
+                placeholder="https://discord.com/api/webhooks/... sau Telegram bot URL" 
                 className="w-full bg-zinc-800/40 border border-white/5 rounded-lg px-4 py-2 text-zinc-100 focus:outline-none focus:border-white/20 font-mono text-sm" 
               />
             </div>

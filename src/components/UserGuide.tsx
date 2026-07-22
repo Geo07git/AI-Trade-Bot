@@ -22,7 +22,7 @@ export function UserGuide() {
           <section className="bg-zinc-900/50 border border-white/5 rounded-2xl p-8">
             <h2 className="font-serif text-2xl text-white mb-4">Abordare Simplificată, Fără Backend</h2>
             <p className="text-zinc-400 font-sans leading-relaxed text-sm mb-6">
-              AI.TRADE folosește acum o arhitectură <strong>complet locală</strong> și se bazează pe modele clasice de Machine Learning (XGBoost, LightGBM, Random Forest). Astfel, nu ai nevoie de servere dedicate, baze de date (salvăm în CSV/SQLite) și nici măcar de API-uri reale de la brokeri pentru a genera și testa strategii.
+              AI.TRADE Bot folosește acum o arhitectură <strong>complet locală</strong> și se bazează pe modele clasice de Machine Learning (XGBoost, LightGBM, Random Forest). Astfel, nu ai nevoie de servere dedicate, baze de date (salvăm în CSV/SQLite) și nici măcar de API-uri reale de la brokeri pentru a genera și testa strategii.
             </p>
 
             <div className="space-y-6">

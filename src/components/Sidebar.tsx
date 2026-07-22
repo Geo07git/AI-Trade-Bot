@@ -28,7 +28,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
   return (
     <aside className="w-64 border-r border-white/5 bg-zinc-900/30 flex flex-col h-full">
       <div className="p-8">
-        <h1 className="font-serif italic text-2xl tracking-tight text-white">AI.TRADE</h1>
+        <h1 className="font-serif italic text-2xl tracking-tight text-white">AI.TRADE Bot</h1>
         <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 mt-1">Algorithmic Trading</p>
       </div>
 
