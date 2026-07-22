@@ -1,4 +1,4 @@
-export type ViewState = 'dashboard' | 'strategies' | 'data_sources' | 'backtesting' | 'analyst' | 'alerts' | 'logs' | 'settings' | 'guide';
+export type ViewState = 'dashboard' | 'strategies' | 'backtesting' | 'analyst' | 'alerts' | 'logs' | 'settings' | 'guide';
 
 export interface Position {
   id: string;
@@ -18,6 +18,7 @@ export interface TradeLog {
   shares: number;
   price: number;
   reason: string;
+  equity?: number;
 }
 
 export interface BacktestResult {

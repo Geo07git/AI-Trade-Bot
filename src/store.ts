@@ -19,7 +19,7 @@ interface TradingStore {
   initialBalance: number;
   watchlist: WatchlistItem[];
   positions: Position[];
-  logs: { time: string; message: string; type: 'info' | 'success' | 'warning' }[];
+  logs: { time: string; message: string; type: 'info' | 'success' | 'warning'; equity?: number }[];
   autoTradingActive: boolean;
   autoTradingInterval: number; // in seconds
   
@@ -83,10 +83,14 @@ export const useTradingStore = create<TradingStore>((set) => ({
       } else {
         newPositions.push({ symbol, amount, entryPrice: price, currentPrice: price });
       }
+      
+      const newBalance = state.balance - cost;
+      const newEquity = newBalance + newPositions.reduce((acc, pos) => acc + (pos.amount * (pos.currentPrice || pos.entryPrice)), 0);
+
       return { 
-        balance: state.balance - cost, 
+        balance: newBalance, 
         positions: newPositions,
-        logs: [{ time: new Date().toLocaleTimeString(), message: `Cumpărat ${amount} ${symbol} @ $${price}`, type: 'success' }, ...state.logs]
+        logs: [{ time: new Date().toLocaleTimeString(), message: `Cumpărat ${amount} ${symbol} @ $${price}`, type: 'success', equity: newEquity }, ...state.logs]
       };
     } else if (action === 'SELL') {
       const existing = state.positions.find(p => p.symbol === symbol);
@@ -94,10 +98,14 @@ export const useTradingStore = create<TradingStore>((set) => ({
         const newPositions = state.positions.map(p => 
           p.symbol === symbol ? { ...p, amount: p.amount - amount } : p
         ).filter(p => p.amount > 0);
+        
+        const newBalance = state.balance + cost;
+        const newEquity = newBalance + newPositions.reduce((acc, pos) => acc + (pos.amount * (pos.currentPrice || pos.entryPrice)), 0);
+        
         return {
-          balance: state.balance + cost,
+          balance: newBalance,
           positions: newPositions,
-          logs: [{ time: new Date().toLocaleTimeString(), message: `Vândut ${amount} ${symbol} @ $${price}`, type: 'warning' }, ...state.logs]
+          logs: [{ time: new Date().toLocaleTimeString(), message: `Vândut ${amount} ${symbol} @ $${price}`, type: 'warning', equity: newEquity }, ...state.logs]
         };
       }
     }

@@ -60,3 +60,38 @@ export async function fetchLivePrice(symbol: string): Promise<number | null> {
   return finalPrice;
 }
 
+export async function fetchChartData(symbol: string): Promise<{ time: string, value: number }[]> {
+  const cleanSymbol = symbol.trim().toUpperCase();
+  
+  try {
+    const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${cleanSymbol}&interval=1h&limit=24`);
+    if (res.ok) {
+      const data = await res.json();
+      return data.map((d: any) => {
+        const date = new Date(d[0]);
+        return {
+          time: `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`,
+          value: parseFloat(d[4]) // close price
+        };
+      });
+    }
+  } catch (error) {
+    console.debug(`Binance API klines lookup failed for ${cleanSymbol}`);
+  }
+  
+  // Fallback to simulator
+  const basePrice = getFallbackBasePrice(cleanSymbol);
+  const data = [];
+  const now = new Date();
+  for (let i = 23; i >= 0; i--) {
+    const time = new Date(now.getTime() - i * 60 * 60 * 1000);
+    // Add random walk starting from basePrice
+    const offset = Math.random() * 0.1 - 0.05;
+    data.push({
+      time: `${time.getHours().toString().padStart(2, '0')}:${time.getMinutes().toString().padStart(2, '0')}`,
+      value: parseFloat((basePrice * (1 + offset)).toFixed(2))
+    });
+  }
+  return data;
+}
+

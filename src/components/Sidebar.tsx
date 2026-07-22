@@ -17,7 +17,6 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
   const navItems: { id: ViewState; label: string; icon?: React.ReactNode }[] = [
     { id: 'dashboard', label: 'Dashboard' },
     { id: 'strategies', label: 'ML Strategies' },
-    { id: 'data_sources', label: 'Data Sources' },
     { id: 'backtesting', label: 'Backtesting' },
     { id: 'analyst', label: 'AI Analyst' },
     { id: 'alerts', label: 'Alerts' },

@@ -43,6 +43,11 @@ export function TradeLogs() {
                     ${log.type === 'info' ? 'text-blue-400' : ''}
                   `}>
                     {log.message}
+                    {log.equity !== undefined && (
+                      <span className="text-zinc-500 font-normal ml-2">
+                        (Portofoliu: ${log.equity.toFixed(2)})
+                      </span>
+                    )}
                   </span>
                 </div>
               ))

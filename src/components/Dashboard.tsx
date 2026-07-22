@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { useTradingStore } from '../store';
-import { fetchLivePrice } from '../services/api';
+import { fetchLivePrice, fetchChartData } from '../services/api';
 import { ArrowUpRight, ArrowDownRight, Wallet, TrendingUp, AlertTriangle, Trash2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -14,18 +14,68 @@ export function Dashboard() {
   const { balance, positions, watchlist, updatePrice, addWatchlist, toggleWatchlistActive, removeWatchlist } = useTradingStore();
   const [newSymbol, setNewSymbol] = useState('');
   
+  const [activeChartId, setActiveChartId] = useState('PORTFOLIO');
+  const [assetChartData, setAssetChartData] = useState<{time: string, value: number}[]>([]);
+
   const equity = balance + positions.reduce((acc, pos) => acc + (pos.amount * (pos.currentPrice || pos.entryPrice)), 0);
   const dayChange = equity - useTradingStore.getState().initialBalance;
   const dayChangePercent = (dayChange / useTradingStore.getState().initialBalance) * 100;
 
+  useEffect(() => {
+    if (activeChartId === 'PORTFOLIO') return;
+
+    let mounted = true;
+    setAssetChartData([]); // Clear previous while loading
+    fetchChartData(activeChartId).then(data => {
+      if (mounted) setAssetChartData(data);
+    });
+
+    return () => { mounted = false; };
+  }, [activeChartId]);
+
   // Use dynamic performance data using local state simulation
-  const mockChartData = [
-    { time: '09:30', equity: useTradingStore.getState().initialBalance },
-    { time: '10:30', equity: useTradingStore.getState().initialBalance * 1.01 },
-    { time: '11:30', equity: useTradingStore.getState().initialBalance * 0.99 },
-    { time: '12:30', equity: useTradingStore.getState().initialBalance * 1.02 },
-    { time: 'Now', equity: equity }
-  ];
+  const displayChartData = activeChartId === 'PORTFOLIO' 
+    ? [
+        { time: '24h', value: useTradingStore.getState().initialBalance },
+        { time: '12h', value: useTradingStore.getState().initialBalance * 1.01 },
+        { time: '6h', value: useTradingStore.getState().initialBalance * 0.99 },
+        { time: '1h', value: useTradingStore.getState().initialBalance * 1.02 },
+        { time: 'Now', value: equity }
+      ]
+    : assetChartData;
+
+  const maxDrawdown = React.useMemo(() => {
+    if (!displayChartData.length) return "0.0%";
+    let max = displayChartData[0].value;
+    let maxDD = 0;
+    for (const point of displayChartData) {
+      if (point.value > max) {
+        max = point.value;
+      }
+      const dd = (max - point.value) / max * 100;
+      if (dd > maxDD) {
+        maxDD = dd;
+      }
+    }
+    return `${maxDD.toFixed(2)}%`;
+  }, [displayChartData]);
+
+  const sharpeRatio = React.useMemo(() => {
+    if (displayChartData.length < 2) return "0.00";
+    const returns = [];
+    for (let i = 1; i < displayChartData.length; i++) {
+      returns.push((displayChartData[i].value - displayChartData[i-1].value) / displayChartData[i-1].value);
+    }
+    const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
+    const variance = returns.reduce((a, b) => a + Math.pow(b - avgReturn, 2), 0) / returns.length;
+    const stdDev = Math.sqrt(variance);
+    
+    if (stdDev === 0) return "0.00";
+    // Simple pseudo-Sharpe based on data frequency
+    const sharpe = (avgReturn / stdDev) * Math.sqrt(displayChartData.length > 5 ? 24 * 365 : 365); 
+    
+    return sharpe.toFixed(2);
+  }, [displayChartData]);
 
   useEffect(() => {
     const fetchAllPrices = async () => {
@@ -82,16 +132,31 @@ export function Dashboard() {
           {/* Chart Section */}
           <div className="col-span-12 xl:col-span-8 bg-zinc-900/50 border border-white/5 rounded-2xl p-6 relative">
             <div className="flex justify-between items-start mb-6">
-              <h2 className="font-serif text-lg text-white">Performance Analytics</h2>
+              <div>
+                <h2 className="font-serif text-lg text-white">Performanță / Istoric (24h)</h2>
+                <div className="flex gap-2 mt-2">
+                  <button 
+                    onClick={() => setActiveChartId('PORTFOLIO')}
+                    className={`px-3 py-1 text-xs rounded transition-colors ${activeChartId === 'PORTFOLIO' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-white/5 text-zinc-400 border border-white/5'}`}>
+                    Portofoliu Global
+                  </button>
+                  {watchlist.filter(w => w.active).map(w => (
+                    <button 
+                      key={w.symbol}
+                      onClick={() => setActiveChartId(w.symbol)}
+                      className={`px-3 py-1 text-xs rounded transition-colors ${activeChartId === w.symbol ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-white/5 text-zinc-400 border border-white/5'}`}>
+                      {w.symbol}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="flex gap-2">
-                <span className="px-2 py-1 bg-white/5 rounded text-[10px] text-zinc-400">1D</span>
-                <span className="px-2 py-1 bg-white/10 text-white rounded text-[10px]">1W</span>
-                <span className="px-2 py-1 bg-white/5 rounded text-[10px] text-zinc-400">1M</span>
+                <span className="px-2 py-1 bg-white/10 text-white rounded text-[10px]">1D (Binance Klines)</span>
               </div>
             </div>
             <div className="h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={mockChartData}>
+                <AreaChart data={displayChartData}>
                   <defs>
                     <linearGradient id="colorEquity" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
@@ -101,21 +166,32 @@ export function Dashboard() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
                   <XAxis dataKey="time" stroke="#52525b" fontSize={10} tickLine={false} axisLine={false} />
                   <YAxis 
-                    domain={['dataMin - 100', 'dataMax + 100']} 
+                    domain={['dataMin', 'dataMax']} 
                     stroke="#52525b" 
                     fontSize={10} 
                     tickLine={false} 
                     axisLine={false}
-                    tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+                    tickFormatter={(value) => activeChartId === 'PORTFOLIO' ? `$${(value / 1000).toFixed(1)}k` : `$${value.toLocaleString()}`}
                   />
                   <Tooltip 
                     contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px', color: '#f4f4f5', fontSize: '12px', fontFamily: 'monospace' }}
                     itemStyle={{ color: '#10b981' }}
+                    formatter={(value: number) => [`$${value.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 6})}`, activeChartId === 'PORTFOLIO' ? 'Portofoliu' : activeChartId]}
                   />
-                  <Area type="monotone" dataKey="equity" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorEquity)" />
+                  <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', color: '#a1a1aa' }} />
+                  <Area 
+                    type="monotone" 
+                    dataKey="value" 
+                    name={activeChartId === 'PORTFOLIO' ? 'Portofoliu Global' : activeChartId}
+                    stroke="#10b981" 
+                    strokeWidth={2} 
+                    fillOpacity={1} 
+                    fill="url(#colorEquity)" 
+                  />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
+
             
             <div className="grid grid-cols-3 gap-4 mt-8">
               <div className="p-4 bg-zinc-800/40 rounded-xl border border-white/5">
@@ -124,11 +200,11 @@ export function Dashboard() {
               </div>
               <div className="p-4 bg-zinc-800/40 rounded-xl border border-white/5">
                 <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">Max Drawdown (Sim)</p>
-                <p className="text-xl font-serif">2.1%</p>
+                <p className="text-xl font-serif">{maxDrawdown}</p>
               </div>
               <div className="p-4 bg-zinc-800/40 rounded-xl border border-white/5">
                 <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">Sharpe Ratio</p>
-                <p className="text-xl font-serif text-emerald-400">3.21</p>
+                <p className="text-xl font-serif text-emerald-400">{sharpeRatio}</p>
               </div>
             </div>
           </div>

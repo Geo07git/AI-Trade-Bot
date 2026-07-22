@@ -5,9 +5,9 @@ import { Dashboard } from './components/Dashboard';
 import { AIAnalyst } from './components/AIAnalyst';
 import { TradeLogs } from './components/TradeLogs';
 import { Strategies } from './components/Strategies';
-import { DataSources } from './components/DataSources';
 import { Alerts } from './components/Alerts';
 import { UserGuide } from './components/UserGuide';
+import { Backtesting } from './components/Backtesting';
 import { useTradingStore } from './store';
 import { requestNotificationPermission, sendWebPush } from './services/notifications';
 import { generateSignal } from './services/ml';
@@ -90,21 +90,13 @@ export default function App() {
       <main className="flex-1 h-full overflow-hidden relative">
         {currentView === 'dashboard' && <Dashboard />}
         {currentView === 'strategies' && <Strategies />}
-        {currentView === 'data_sources' && <DataSources />}
         {currentView === 'analyst' && <AIAnalyst />}
         {currentView === 'alerts' && <Alerts />}
         {currentView === 'logs' && <TradeLogs />}
         {currentView === 'guide' && <UserGuide />}
         
-        {/* Placeholder for Backtesting */}
-        {currentView === 'backtesting' && (
-          <div className="p-8 h-full flex flex-col items-center justify-center text-center">
-            <h2 className="text-xl font-serif text-zinc-300 mb-2">Backtesting Engine</h2>
-            <p className="text-zinc-500 max-w-md">
-              Configure strategy parameters and run historical data simulations. This module requires a connected broker API for historical data ingestion.
-            </p>
-          </div>
-        )}
+        {/* Backtesting Module */}
+        {currentView === 'backtesting' && <Backtesting />}
 
         {/* Placeholder for Settings */}
         {currentView === 'settings' && (
