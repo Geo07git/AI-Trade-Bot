@@ -16,7 +16,7 @@ import { UserGuide } from './components/UserGuide';
 import { Backtesting } from './components/Backtesting';
 import { Settings } from './components/Settings';
 import { useTradingStore } from './store';
-import { sendWebPush, sendWebhookMessage } from './services/notifications';
+import { sendWebPush, sendNotificationMessage } from './services/notifications';
 import { generateSignal } from './services/ml';
 import { fetchLivePrice } from './services/api';
 import { Menu } from 'lucide-react';
@@ -31,10 +31,8 @@ export default function App() {
     dataInterval,
     analysisInterval, 
     setAutoTradingActive, 
-    updatePrice,
-    webhookUrl
+    updatePrice
   } = useTradingStore();
-
 
   const [dataCountdown, setDataCountdown] = useState(dataInterval);
   const [analysisCountdown, setAnalysisCountdown] = useState(analysisInterval);
@@ -53,7 +51,12 @@ export default function App() {
             logs: data.logs,
             watchlist: data.watchlist,
             autoTradingActive: data.autoTradingActive,
-            webhookUrl: data.webhookUrl || useTradingStore.getState().webhookUrl,
+            notificationProvider: data.notificationProvider || useTradingStore.getState().notificationProvider,
+            discordWebhookUrl: data.discordWebhookUrl || useTradingStore.getState().discordWebhookUrl,
+            telegramBotToken: data.telegramBotToken || useTradingStore.getState().telegramBotToken,
+            telegramChatId: data.telegramChatId || useTradingStore.getState().telegramChatId,
+            timezone: data.timezone || useTradingStore.getState().timezone,
+            reportConfig: data.reportConfig || useTradingStore.getState().reportConfig,
           });
         }
       } catch (err) {
@@ -81,37 +84,6 @@ export default function App() {
   // Data Update Loop (Prices & Indicators)
   useEffect(() => {
     if (dataCountdown <= 0) {
-      const state = useTradingStore.getState();
-      
-      const fetchPrices = async () => {
-        for (const item of state.watchlist) {
-          const price = await fetchLivePrice(item.symbol);
-          if (price) {
-            state.updatePrice(item.symbol, price);
-            
-            // Check Stop Loss / Take Profit conditions dynamically here
-            if (autoTradingActive) {
-              const position = state.positions.find(p => p.symbol === item.symbol);
-              if (position && position.amount > 0) {
-                const pnlPercent = ((price - position.entryPrice) / position.entryPrice) * 100;
-                if (pnlPercent <= -5) {
-                  state.executeTrade(item.symbol, 'SELL', price, position.amount);
-                  state.addLog(`[Stop Loss] Ieșire din ${item.symbol} la prețul de ${price} ($${(price * position.amount).toFixed(2)})`, 'warning');
-                  sendWebPush('Stop Loss Executat', `Activ: ${item.symbol}\nPreț: $${price}\nMotiv: PNL a atins -5%`);
-                  if (webhookUrl) sendWebhookMessage(webhookUrl, `🚨 **Stop Loss Executat**\nActiv: ${item.symbol}\nPreț: $${price}\nMotiv: PNL a atins -5%`);
-                } else if (pnlPercent >= 10) {
-                  state.executeTrade(item.symbol, 'SELL', price, position.amount);
-                  state.addLog(`[Take Profit] Ieșire din ${item.symbol} la prețul de ${price} ($${(price * position.amount).toFixed(2)})`, 'success');
-                  sendWebPush('Take Profit Executat', `Activ: ${item.symbol}\nPreț: $${price}\nMotiv: PNL a atins +10%`);
-                  if (webhookUrl) sendWebhookMessage(webhookUrl, `✅ **Take Profit Executat**\nActiv: ${item.symbol}\nPreț: $${price}\nMotiv: PNL a atins +10%`);
-                }
-              }
-            }
-          }
-        }
-      };
-
-      fetchPrices();
       setDataCountdown(dataInterval);
     }
   }, [dataCountdown, autoTradingActive, dataInterval]);
@@ -121,41 +93,6 @@ export default function App() {
     if (!autoTradingActive) return;
 
     if (analysisCountdown <= 0) {
-      const state = useTradingStore.getState();
-      const activeItems = state.watchlist.filter(w => w.active);
-
-      if (activeItems.length > 0) {
-        state.addLog(`[Calcul Automat AI] Se evaluează contextul de piață...`, 'info');
-
-        activeItems.forEach((item) => {
-          if (!item.price) return;
-
-          const signal = generateSignal(item.symbol, item.price);
-          // Only log if the signal is strong or changed? We update it silently to UI.
-          state.updateSignal(item.symbol, signal);
-
-          const position = state.positions.find(p => p.symbol === item.symbol);
-          const isHolding = position && position.amount > 0;
-
-          if (signal.action === 'BUY' && signal.prob >= 60) {
-            if (!isHolding) {
-              const amountToBuy = parseFloat((1000 / item.price).toFixed(6));
-              state.addLog(`[Calcul Automat] ${item.symbol}: Semnal ${signal.action} (${signal.prob}% probabilitate). Executăm intrare.`, 'info');
-              state.executeTrade(item.symbol, 'BUY', item.price, amountToBuy);
-              sendWebPush('Semnal AI Automat: CUMPĂRĂ', `Activ: ${item.symbol}\nPreț: $${item.price}`);
-              if (webhookUrl) sendWebhookMessage(webhookUrl, `🟢 **Semnal AI Automat: CUMPĂRĂ**\nActiv: ${item.symbol}\nPreț: $${item.price}`);
-            }
-          } else if (signal.action === 'SELL' && signal.prob >= 60) {
-            if (isHolding) {
-              state.addLog(`[Calcul Automat] ${item.symbol}: Semnal ${signal.action} (${signal.prob}% probabilitate). Executăm ieșire.`, 'info');
-              state.executeTrade(item.symbol, 'SELL', item.price, position.amount);
-              sendWebPush('Semnal AI Automat: VÂNZARE', `Activ: ${item.symbol}\nPreț: $${item.price}`);
-              if (webhookUrl) sendWebhookMessage(webhookUrl, `🔴 **Semnal AI Automat: VÂNZARE**\nActiv: ${item.symbol}\nPreț: $${item.price}`);
-            }
-          }
-        });
-      }
-
       setAnalysisCountdown(analysisInterval);
     }
   }, [analysisCountdown, autoTradingActive, analysisInterval]);
@@ -170,7 +107,7 @@ export default function App() {
   }, [analysisInterval]);
 
   return (
-    <div className="flex flex-col md:flex-row h-screen w-full bg-[#050505] text-zinc-100 overflow-hidden font-sans">
+    <div className="flex flex-col md:flex-row h-screen w-full bg-black text-zinc-100 overflow-hidden font-sans">
       {/* Mobile Top Header */}
       <header className="md:hidden h-14 bg-zinc-900/90 border-b border-white/5 flex items-center justify-between px-3 shrink-0 z-30">
         <div className="flex items-center gap-2">

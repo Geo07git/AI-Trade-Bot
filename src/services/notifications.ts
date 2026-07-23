@@ -29,28 +29,29 @@ export function sendWebPush(title: string, body: string) {
   }
 }
 
-export async function sendWebhookMessage(url: string, message: string) {
-  if (!url) return;
-
+export async function sendNotificationMessage(
+  provider: 'discord' | 'telegram',
+  discordWebhookUrl: string,
+  telegramBotToken: string,
+  telegramChatId: string,
+  message: string
+) {
   try {
-    // Discord webhook format
-    let payload = { content: message };
-    
-    // Auto-detect Telegram (very basic) and format accordingly
-    if (url.includes('api.telegram.org')) {
-      // For telegram, the URL usually is https://api.telegram.org/bot<token>/sendMessage?chat_id=<id>
-      // For simplicity, if the user provided the full URL with query params, we might just need to append text or send it as POST.
-      // We assume the user provides a webhook URL that accepts a POST with {text: message} or we just let it fail gracefully.
-      // A proper implementation would require chat_id, but here we just try a basic POST.
-      payload = { text: message } as any;
+    if (provider === 'discord' && discordWebhookUrl) {
+      await fetch(discordWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: message })
+      });
+    } else if (provider === 'telegram' && telegramBotToken && telegramChatId) {
+      const url = `https://api.telegram.org/bot${telegramBotToken}/sendMessage`;
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: telegramChatId, text: message })
+      });
     }
-
-    await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
   } catch (err) {
-    console.error("Eroare la trimiterea webhook-ului:", err);
+    console.error("Eroare la trimiterea notificării:", err);
   }
 }

@@ -50,7 +50,7 @@ export function TradeLogs() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#050505]">
+    <div className="flex flex-col h-full bg-black">
       <header className="h-20 border-b border-white/5 flex items-center justify-between px-8 bg-zinc-900/10 backdrop-blur-md shrink-0 flex-wrap gap-2">
         <div>
           <h1 className="font-serif text-xl text-white">Decision Journal</h1>

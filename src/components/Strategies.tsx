@@ -57,7 +57,7 @@ export function Strategies() {
   const latestSignal = getLatestSignal();
 
   return (
-    <div className="flex flex-col h-full bg-[#050505]">
+    <div className="flex flex-col h-full bg-black">
       <header className="h-20 border-b border-white/5 flex items-center justify-between px-8 bg-zinc-900/10 backdrop-blur-md shrink-0">
         <div>
           <h1 className="font-serif text-xl text-white">Machine Learning Strategies (Classic Models)</h1>

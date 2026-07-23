@@ -27,7 +27,17 @@ interface TradingStore {
   apiKey: string;
   apiSecret: string;
   geminiApiKey: string;
-  webhookUrl: string;
+  notificationProvider: 'discord' | 'telegram';
+  discordWebhookUrl: string;
+  telegramBotToken: string;
+  telegramChatId: string;
+  timezone: string;
+  reportConfig: {
+    channels: { telegram: boolean; discord: boolean; browser: boolean };
+    daily: { enabled: boolean; time: string };
+    weekly: { enabled: boolean; day: number; time: string };
+    monthly: { enabled: boolean };
+  };
   
   setBalance: (amount: number) => void;
   addWatchlist: (symbol: string) => void;
@@ -43,7 +53,12 @@ interface TradingStore {
   setApiKey: (key: string) => void;
   setApiSecret: (secret: string) => void;
   setGeminiApiKey: (key: string) => void;
-  setWebhookUrl: (url: string) => void;
+  setNotificationProvider: (provider: 'discord' | 'telegram') => void;
+  setDiscordWebhookUrl: (url: string) => void;
+  setTelegramBotToken: (token: string) => void;
+  setTelegramChatId: (id: string) => void;
+  setTimezone: (timezone: string) => void;
+  setReportConfig: (config: Partial<TradingStore['reportConfig']>) => void;
 }
 
 export const useTradingStore = create<TradingStore>()(
@@ -64,7 +79,17 @@ export const useTradingStore = create<TradingStore>()(
   apiKey: '',
   apiSecret: '',
   geminiApiKey: '',
-  webhookUrl: '',
+  notificationProvider: 'discord',
+  discordWebhookUrl: '',
+  telegramBotToken: '',
+  telegramChatId: '',
+  timezone: 'Europe/Bucharest',
+  reportConfig: {
+    channels: { telegram: true, discord: false, browser: false },
+    daily: { enabled: true, time: '21:00' },
+    weekly: { enabled: true, day: 0, time: '21:00' },
+    monthly: { enabled: true }
+  },
   
   setBalance: (amount) => {
     set({ balance: amount, initialBalance: amount, positions: [], logs: [] });
@@ -136,11 +161,17 @@ export const useTradingStore = create<TradingStore>()(
         
         const newBalance = state.balance - cost;
         const newEquity = newBalance + newPositions.reduce((acc, pos) => acc + (pos.amount * (pos.currentPrice || pos.entryPrice)), 0);
+        
+        const timeFormatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: state.timezone || 'Europe/Bucharest',
+          hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+        });
+        const time = timeFormatter.format(new Date());
 
         return { 
           balance: newBalance, 
           positions: newPositions,
-          logs: [{ time: new Date().toLocaleTimeString(), message: `Cumpărat ${amount} ${symbol} @ $${price}`, type: 'success', equity: newEquity }, ...state.logs]
+          logs: [{ time, message: `Cumpărat ${amount} ${symbol} @ $${price}`, type: 'success', equity: newEquity }, ...state.logs]
         };
       } else if (action === 'SELL') {
         const existing = state.positions.find(p => p.symbol === symbol);
@@ -152,10 +183,16 @@ export const useTradingStore = create<TradingStore>()(
           const newBalance = state.balance + cost;
           const newEquity = newBalance + newPositions.reduce((acc, pos) => acc + (pos.amount * (pos.currentPrice || pos.entryPrice)), 0);
           
-          return {
+          const timeFormatter = new Intl.DateTimeFormat('en-US', {
+            timeZone: state.timezone || 'Europe/Bucharest',
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+          });
+          const time = timeFormatter.format(new Date());
+
+          return { 
             balance: newBalance,
             positions: newPositions,
-            logs: [{ time: new Date().toLocaleTimeString(), message: `Vândut ${amount} ${symbol} @ $${price}`, type: 'warning', equity: newEquity }, ...state.logs]
+            logs: [{ time, message: `Vândut ${amount} ${symbol} @ $${price}`, type: 'warning', equity: newEquity }, ...state.logs]
           };
         }
       }
@@ -163,9 +200,16 @@ export const useTradingStore = create<TradingStore>()(
     });
   },
 
-  addLog: (message, type = 'info') => set((state) => ({
-    logs: [{ time: new Date().toLocaleTimeString(), message, type }, ...state.logs]
-  })),
+  addLog: (message, type = 'info') => set((state) => {
+    const timeFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: state.timezone || 'Europe/Bucharest',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+    });
+    const time = timeFormatter.format(new Date());
+    return {
+      logs: [{ time, message, type }, ...state.logs]
+    };
+  }),
 
   setAutoTradingActive: (active) => {
     set({ autoTradingActive: active });
@@ -194,14 +238,55 @@ export const useTradingStore = create<TradingStore>()(
   setApiKey: (key) => set({ apiKey: key }),
   setApiSecret: (secret) => set({ apiSecret: secret }),
   setGeminiApiKey: (key) => set({ geminiApiKey: key }),
-  setWebhookUrl: (url) => {
-    set({ webhookUrl: url });
+  setNotificationProvider: (provider) => {
+    set({ notificationProvider: provider });
     fetch('/api/bot/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ webhookUrl: url })
+      body: JSON.stringify({ notificationProvider: provider })
     }).catch(() => {});
-  }
+  },
+  setDiscordWebhookUrl: (url) => {
+    set({ discordWebhookUrl: url });
+    fetch('/api/bot/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ discordWebhookUrl: url })
+    }).catch(() => {});
+  },
+  setTelegramBotToken: (token) => {
+    set({ telegramBotToken: token });
+    fetch('/api/bot/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ telegramBotToken: token })
+    }).catch(() => {});
+  },
+  setTelegramChatId: (id) => {
+    set({ telegramChatId: id });
+    fetch('/api/bot/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ telegramChatId: id })
+    }).catch(() => {});
+  },
+  setTimezone: (timezone) => {
+    set({ timezone });
+    fetch('/api/bot/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timezone })
+    }).catch(() => {});
+  },
+  setReportConfig: (config) => set((state) => {
+    const newConfig = { ...state.reportConfig, ...config };
+    fetch('/api/bot/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reportConfig: newConfig })
+    }).catch(() => {});
+    return { reportConfig: newConfig };
+  })
     }),
     {
       name: 'trading-store'

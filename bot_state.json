@@ -1,0 +1,120 @@
+{
+  "autoTradingActive": true,
+  "balance": 5000.01106638,
+  "initialBalance": 10000,
+  "watchlist": [
+    {
+      "symbol": "BTCUSDT",
+      "price": 65532.84,
+      "signal": {
+        "action": "HOLD",
+        "prob": 56
+      },
+      "active": true
+    },
+    {
+      "symbol": "ETHUSDT",
+      "price": 1919.9,
+      "signal": {
+        "action": "HOLD",
+        "prob": 54
+      },
+      "active": true
+    },
+    {
+      "symbol": "SOLUSDT",
+      "price": 77.25,
+      "signal": {
+        "action": "HOLD",
+        "prob": 53
+      },
+      "active": true
+    }
+  ],
+  "positions": [
+    {
+      "symbol": "BTCUSDT",
+      "amount": 0.045757,
+      "entryPrice": 65738.08,
+      "currentPrice": 65532.84
+    },
+    {
+      "symbol": "SOLUSDT",
+      "amount": 25.93025,
+      "entryPrice": 77.11,
+      "currentPrice": 77.25
+    }
+  ],
+  "logs": [
+    {
+      "time": "8:16:29 AM",
+      "message": "[SERVER BOT] Cumpărat 0.015263 BTCUSDT @ $65517.14",
+      "type": "success",
+      "equity": 10002.03
+    },
+    {
+      "time": "7:34:17 AM",
+      "message": "[SERVER BOT] Cumpărat 12.961763 SOLUSDT @ $77.15",
+      "type": "success",
+      "equity": 9995.92
+    },
+    {
+      "time": "7:34:17 AM",
+      "message": "[SERVER BOT] Cumpărat 0.015282 BTCUSDT @ $65436.01",
+      "type": "success",
+      "equity": 9995.92
+    },
+    {
+      "time": "7:14:04 AM",
+      "message": "[SERVER BOT] Cumpărat 12.968487 SOLUSDT @ $77.11",
+      "type": "success",
+      "equity": 9994.22
+    },
+    {
+      "time": "7:01:10 AM",
+      "message": "[SERVER BOT] Cumpărat 0.015212 BTCUSDT @ $65738.08",
+      "type": "success",
+      "equity": 10000
+    },
+    {
+      "time": "7:01:10 AM",
+      "message": "[Signal Server ML] BTCUSDT: BUY (71% prob). Executăm cumpărare automat.",
+      "type": "info"
+    },
+    {
+      "time": "7:00:39 AM",
+      "message": "🤖 Engine-ul de fundal AI.TRADE Bot a fost inițializat pe server. Rulare 24/7 activă!",
+      "type": "info"
+    }
+  ],
+  "tradeHistory": [],
+  "reportConfig": {
+    "channels": {
+      "telegram": true,
+      "discord": false,
+      "browser": false
+    },
+    "daily": {
+      "enabled": true,
+      "time": "21:00"
+    },
+    "weekly": {
+      "enabled": true,
+      "day": 0,
+      "time": "21:00"
+    },
+    "monthly": {
+      "enabled": true
+    }
+  },
+  "notificationProvider": "telegram",
+  "discordWebhookUrl": "",
+  "telegramBotToken": "8993692324:AAHGJBYPiE3LZH_9NiI5_D2I6BAwcLZ_o_c",
+  "telegramChatId": "1867325064",
+  "dataInterval": 10,
+  "analysisInterval": 30,
+  "serverStartedAt": "2026-07-23T07:00:39.851Z",
+  "lastCheckAt": "2026-07-23T08:24:11.923Z",
+  "totalTradesExecuted": 5,
+  "webhookUrl": ""
+}

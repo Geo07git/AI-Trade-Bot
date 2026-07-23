@@ -40,7 +40,7 @@ export function Sidebar({ currentView, onViewChange, isOpenMobile, onCloseMobile
       )}
 
       <aside className={cn(
-        "w-64 border-r border-white/5 bg-[#0a0a0c] flex flex-col h-full z-50 transition-transform duration-300 ease-in-out shrink-0",
+        "w-64 border-r border-white/5 bg-black backdrop-blur-3xl flex flex-col h-full z-50 transition-transform duration-300 ease-in-out shrink-0",
         "fixed inset-y-0 left-0 md:static md:translate-x-0",
         isOpenMobile ? "translate-x-0 shadow-2xl" : "-translate-x-full md:translate-x-0"
       )}>

@@ -17,8 +17,14 @@ export function Settings() {
     setApiSecret,
     geminiApiKey,
     setGeminiApiKey,
-    webhookUrl,
-    setWebhookUrl
+    notificationProvider,
+    setNotificationProvider,
+    discordWebhookUrl,
+    setDiscordWebhookUrl,
+    telegramBotToken,
+    setTelegramBotToken,
+    telegramChatId,
+    setTelegramChatId
   } = useTradingStore();
 
   const handleEnablePush = async () => {
@@ -26,7 +32,7 @@ export function Settings() {
   };
 
   return (
-    <div className="p-8 h-full overflow-y-auto max-w-2xl mx-auto">
+    <div className="p-8 h-full overflow-y-auto max-w-2xl mx-auto pb-32">
       <div className="mb-10">
         <h2 className="text-2xl font-serif text-white tracking-tight">Setări Platformă</h2>
         <p className="text-zinc-400 mt-2 text-sm">Configurare parametri aplicație și intervale de timp.</p>
@@ -142,19 +148,71 @@ export function Settings() {
         </div>
 
         <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-6">
-          <h3 className="text-lg font-serif text-zinc-200 mb-4">Webhooks (Discord / Telegram)</h3>
-          <p className="text-sm text-zinc-400 mb-4">Primește semnalele de tranzacționare direct pe telefon via Discord sau Telegram. Introdu URL-ul de webhook generat de platforma aleasă.</p>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-1 font-sans">Webhook URL</label>
-              <input 
-                type="text" 
-                value={webhookUrl}
-                onChange={(e) => setWebhookUrl(e.target.value)}
-                placeholder="https://discord.com/api/webhooks/... sau Telegram bot URL" 
-                className="w-full bg-zinc-800/40 border border-white/5 rounded-lg px-4 py-2 text-zinc-100 focus:outline-none focus:border-white/20 font-mono text-sm" 
-              />
+          <h3 className="text-lg font-serif text-zinc-200 mb-4">Notificări (Discord / Telegram)</h3>
+          <p className="text-sm text-zinc-400 mb-4">Primește semnalele de tranzacționare direct pe telefon. Alege platforma preferată și configurează detaliile.</p>
+          <div className="space-y-6">
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input 
+                  type="radio" 
+                  name="provider" 
+                  value="discord"
+                  checked={notificationProvider === 'discord'}
+                  onChange={() => setNotificationProvider('discord')}
+                  className="accent-emerald-500"
+                />
+                <span className="text-sm text-zinc-300">Discord</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input 
+                  type="radio" 
+                  name="provider" 
+                  value="telegram"
+                  checked={notificationProvider === 'telegram'}
+                  onChange={() => setNotificationProvider('telegram')}
+                  className="accent-emerald-500"
+                />
+                <span className="text-sm text-zinc-300">Telegram</span>
+              </label>
             </div>
+
+            {notificationProvider === 'discord' && (
+              <div>
+                <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-1 font-sans">Discord Webhook URL</label>
+                <input 
+                  type="text" 
+                  value={discordWebhookUrl}
+                  onChange={(e) => setDiscordWebhookUrl(e.target.value)}
+                  placeholder="https://discord.com/api/webhooks/..." 
+                  className="w-full bg-zinc-800/40 border border-white/5 rounded-lg px-4 py-2 text-zinc-100 focus:outline-none focus:border-white/20 font-mono text-sm" 
+                />
+              </div>
+            )}
+
+            {notificationProvider === 'telegram' && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-1 font-sans">Telegram Bot Token</label>
+                  <input 
+                    type="password" 
+                    value={telegramBotToken}
+                    onChange={(e) => setTelegramBotToken(e.target.value)}
+                    placeholder="Ex: 123456789:ABCdefGHIjklMNOpqrs..." 
+                    className="w-full bg-zinc-800/40 border border-white/5 rounded-lg px-4 py-2 text-zinc-100 focus:outline-none focus:border-white/20 font-mono text-sm" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-1 font-sans">Chat ID</label>
+                  <input 
+                    type="text" 
+                    value={telegramChatId}
+                    onChange={(e) => setTelegramChatId(e.target.value)}
+                    placeholder="Ex: 123456789" 
+                    className="w-full bg-zinc-800/40 border border-white/5 rounded-lg px-4 py-2 text-zinc-100 focus:outline-none focus:border-white/20 font-mono text-sm" 
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

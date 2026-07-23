@@ -122,7 +122,7 @@ ${portfolio.join('\n') || 'None'}
   ];
 
   return (
-    <div className="flex h-full bg-[#050505]">
+    <div className="flex h-full bg-black">
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0 border-r border-white/5">
         <header className="h-20 border-b border-white/5 flex items-center justify-between px-8 bg-zinc-900/10 backdrop-blur-md shrink-0">

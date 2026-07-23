@@ -104,15 +104,15 @@ export function Dashboard() {
         <div className="flex flex-wrap items-center gap-4 sm:gap-8 w-full md:w-auto">
           <div>
             <p className="text-[10px] uppercase text-zinc-500 tracking-wider mb-0.5">Capital Virtual</p>
-            <p className="font-serif text-lg sm:text-xl font-medium">${equity.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} <span className={cn("text-xs sm:text-sm font-sans ml-1", dayChangePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>{dayChangePercent >= 0 ? '+' : ''}{dayChangePercent.toFixed(2)}%</span></p>
+            <p className="font-serif text-lg sm:text-xl font-medium">${Number(equity || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} <span className={cn("text-xs sm:text-sm font-sans ml-1", dayChangePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>{dayChangePercent >= 0 ? '+' : ''}{(dayChangePercent || 0).toFixed(2)}%</span></p>
           </div>
           <div>
             <p className="text-[10px] uppercase text-zinc-500 tracking-wider mb-0.5">Profit Virtual</p>
-            <p className={cn("font-serif text-lg sm:text-xl font-medium", dayChange >= 0 ? "text-emerald-400" : "text-rose-400")}>{dayChange >= 0 ? '+' : ''}${dayChange.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+            <p className={cn("font-serif text-lg sm:text-xl font-medium", dayChange >= 0 ? "text-emerald-400" : "text-rose-400")}>{dayChange >= 0 ? '+' : ''}${Number(dayChange || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
           </div>
           <div>
             <p className="text-[10px] uppercase text-zinc-500 tracking-wider mb-0.5">Cash Disponibil</p>
-            <p className="font-serif text-lg sm:text-xl font-medium">${balance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+            <p className="font-serif text-lg sm:text-xl font-medium">${Number(balance || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
           </div>
         </div>
         
@@ -178,12 +178,12 @@ export function Dashboard() {
                     fontSize={10} 
                     tickLine={false} 
                     axisLine={false}
-                    tickFormatter={(value) => activeChartId === 'PORTFOLIO' ? `$${(value / 1000).toFixed(1)}k` : `$${value.toLocaleString()}`}
+                    tickFormatter={(value) => activeChartId === 'PORTFOLIO' ? `$${(Number(value) / 1000).toFixed(1)}k` : `$${Number(value || 0).toLocaleString()}`}
                   />
                   <Tooltip 
                     contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px', color: '#f4f4f5', fontSize: '12px', fontFamily: 'monospace' }}
                     itemStyle={{ color: '#10b981' }}
-                    formatter={(value: number) => [`$${value.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 6})}`, activeChartId === 'PORTFOLIO' ? 'Portofoliu' : activeChartId]}
+                    formatter={(value: any) => [`$${Number(value || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 6})}`, activeChartId === 'PORTFOLIO' ? 'Portofoliu' : activeChartId]}
                   />
                   <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', color: '#a1a1aa' }} />
                   <Area 
@@ -251,7 +251,7 @@ export function Dashboard() {
                   {watchlist.map((item) => (
                     <tr key={item.symbol}>
                       <td className="py-3 font-bold text-zinc-200">{item.symbol}</td>
-                      <td className="py-3">{item.price ? `$${item.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}` : 'Se încarcă...'}</td>
+                      <td className="py-3">{item.price ? `$${Number(item.price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}` : 'Se încarcă...'}</td>
                       <td className={`py-3 text-right font-bold tracking-wider ${item.signal?.action === 'BUY' ? 'text-emerald-400' : item.signal?.action === 'SELL' ? 'text-rose-400' : 'text-zinc-400'}`}>
                         {item.signal ? `${item.signal.action} (${item.signal.prob}%)` : '-'}
                       </td>
@@ -305,12 +305,12 @@ export function Dashboard() {
                       <div className="flex justify-between items-end">
                         <div>
                            <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Value (Qty)</p>
-                           <p className="text-sm font-mono text-zinc-300">${value.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} <span className="text-xs text-zinc-500">({pos.amount})</span></p>
+                           <p className="text-sm font-mono text-zinc-300">${Number(value || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} <span className="text-xs text-zinc-500">({pos.amount})</span></p>
                         </div>
                         <div className="text-right">
                            <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">P&L / Entry</p>
                            <p className={cn("text-sm font-mono", pl >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                             ${Math.abs(pl).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} <span className="text-xs text-zinc-500">(@ ${pos.entryPrice.toLocaleString(undefined, {maximumFractionDigits: 6})})</span>
+                             ${Number(Math.abs(pl) || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} <span className="text-xs text-zinc-500">(@ ${Number(pos.entryPrice || 0).toLocaleString(undefined, {maximumFractionDigits: 6})})</span>
                            </p>
                         </div>
                       </div>
