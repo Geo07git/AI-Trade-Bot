@@ -11,15 +11,15 @@ function cn(...inputs: (string | undefined | null | false)[]) {
 }
 
 export function Dashboard() {
-  const { balance, positions, watchlist, updatePrice, addWatchlist, toggleWatchlistActive, removeWatchlist, autoTradingActive, setAutoTradingActive } = useTradingStore();
+  const { balance, positions, watchlist, logs, initialBalance, updatePrice, addWatchlist, toggleWatchlistActive, removeWatchlist, autoTradingActive, setAutoTradingActive } = useTradingStore();
   const [newSymbol, setNewSymbol] = useState('');
   
   const [activeChartId, setActiveChartId] = useState('PORTFOLIO');
   const [assetChartData, setAssetChartData] = useState<{time: string, value: number}[]>([]);
 
   const equity = balance + positions.reduce((acc, pos) => acc + (pos.amount * (pos.currentPrice || pos.entryPrice)), 0);
-  const dayChange = equity - useTradingStore.getState().initialBalance;
-  const dayChangePercent = (dayChange / useTradingStore.getState().initialBalance) * 100;
+  const dayChange = equity - initialBalance;
+  const dayChangePercent = (dayChange / initialBalance) * 100;
 
   useEffect(() => {
     if (activeChartId === 'PORTFOLIO') return;
@@ -34,14 +34,29 @@ export function Dashboard() {
   }, [activeChartId]);
 
   // Use dynamic performance data using local state simulation
-  const displayChartData = activeChartId === 'PORTFOLIO' 
-    ? [
-        { time: '24h', value: useTradingStore.getState().initialBalance },
-        { time: '12h', value: useTradingStore.getState().initialBalance * 1.01 },
-        { time: '6h', value: useTradingStore.getState().initialBalance * 0.99 },
-        { time: '1h', value: useTradingStore.getState().initialBalance * 1.02 },
+  const portfolioChartData = React.useMemo(() => {
+    const data = logs
+      .filter(log => log.equity !== undefined)
+      .map(log => ({ time: log.time, value: log.equity as number }))
+      .reverse();
+    
+    if (data.length === 0) {
+      return [
+        { time: 'Start', value: initialBalance },
         { time: 'Now', value: equity }
-      ]
+      ];
+    }
+    
+    // Add start and current equity if we have some data points
+    return [
+      { time: 'Start', value: initialBalance },
+      ...data,
+      { time: 'Now', value: equity }
+    ];
+  }, [logs, equity, initialBalance]);
+
+  const displayChartData = activeChartId === 'PORTFOLIO' 
+    ? portfolioChartData
     : assetChartData;
 
   const maxDrawdown = React.useMemo(() => {

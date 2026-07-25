@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import Binance from 'binance-api-node';
 
 export interface WatchlistItem {
   symbol: string;
@@ -68,6 +69,9 @@ export interface BotState {
   timezone: string;
   dataInterval: number; // in seconds
   analysisInterval: number; // in seconds
+  apiKey: string;
+  apiSecret: string;
+  binanceMode: 'testnet' | 'live' | 'paper';
   serverStartedAt: string;
   lastCheckAt: string;
   totalTradesExecuted: number;
@@ -122,25 +126,64 @@ async function fetchLivePriceServer(symbol: string): Promise<number> {
   return parseFloat((basePrice * fluctuation).toFixed(2));
 }
 
-function generateSignalServer(symbol: string, currentPrice: number) {
-  const hash = symbol.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const rawProb = 40 + (hash % 30) + (Math.random() * 20 - 10);
-  
-  let action: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
-  let prob = rawProb;
+async function generateSignalServer(symbol: string, currentPrice: number) {
+  const cleanSymbol = symbol.trim().toUpperCase();
+  try {
+    const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${cleanSymbol}&interval=1h&limit=100`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length >= 30) {
+        const closes = data.map((d: any) => parseFloat(d[4]));
+        let gains = 0, losses = 0;
+        for (let i = 1; i <= 14; i++) {
+          const diff = closes[i] - closes[i - 1];
+          if (diff >= 0) gains += diff;
+          else losses -= diff;
+        }
+        let avgGain = gains / 14;
+        let avgLoss = losses / 14;
+        for (let i = 15; i < closes.length; i++) {
+          const diff = closes[i] - closes[i - 1];
+          const gain = diff > 0 ? diff : 0;
+          const loss = diff < 0 ? -diff : 0;
+          avgGain = (avgGain * 13 + gain) / 14;
+          avgLoss = (avgLoss * 13 + loss) / 14;
+        }
+        const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+        const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + rs));
 
-  if (rawProb > 65) {
-    action = 'BUY';
-    prob = rawProb;
-  } else if (rawProb < 45) {
-    action = 'SELL';
-    prob = 100 - rawProb;
-  } else {
-    action = 'HOLD';
-    prob = 50 + Math.random() * 10;
+        const firstClose = closes[0];
+        const lastClose = closes[closes.length - 1];
+        const momentum = ((lastClose - firstClose) / firstClose) * 100;
+
+        let action: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
+        let prob = 50;
+
+        if (rsi < 35 || (rsi < 48 && momentum > 1.2)) {
+          prob = Math.min(95, Math.round(62 + (35 - Math.min(35, rsi)) * 0.8 + momentum * 2));
+          action = prob >= 60 ? 'BUY' : 'HOLD';
+        } else if (rsi > 65 || (rsi > 52 && momentum < -1.2)) {
+          prob = Math.min(95, Math.round(62 + (rsi - 65) * 0.8 - momentum * 2));
+          action = prob >= 60 ? 'SELL' : 'HOLD';
+        } else {
+          action = 'HOLD';
+          prob = 52;
+        }
+
+        return { action, prob: Math.max(50, prob) };
+      }
+    }
+  } catch (err) {
+    // Fallback below
   }
 
-  return { action, prob: Math.round(prob) };
+  const hash = symbol.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const rawProb = 45 + (hash % 20);
+  let action: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
+  let prob = rawProb;
+  if (rawProb >= 60) { action = 'BUY'; prob = rawProb; }
+  else { action = 'HOLD'; prob = 52; }
+  return { action, prob };
 }
 
 async function sendWebhookServer(provider: 'discord' | 'telegram', urlOrToken: string, chatIdOrMessage: string, message?: string) {
@@ -177,9 +220,18 @@ class ServerBotEngine {
       balance: 10000,
       initialBalance: 10000,
       watchlist: [
-        { symbol: 'BTCUSDT', price: 64230, signal: { action: 'BUY', prob: 88 }, active: true },
-        { symbol: 'ETHUSDT', price: 3450, signal: { action: 'BUY', prob: 76 }, active: true },
-        { symbol: 'SOLUSDT', price: 145.20, signal: { action: 'HOLD', prob: 52 }, active: false },
+        { symbol: 'BTCUSDT', price: null, signal: null, active: true },
+        { symbol: 'ETHUSDT', price: null, signal: null, active: true },
+        { symbol: 'BNBUSDT', price: null, signal: null, active: true },
+        { symbol: 'SOLUSDT', price: null, signal: null, active: true },
+        { symbol: 'XRPUSDT', price: null, signal: null, active: true },
+        { symbol: 'ADAUSDT', price: null, signal: null, active: true },
+        { symbol: 'LINKUSDT', price: null, signal: null, active: true },
+        { symbol: 'AVAXUSDT', price: null, signal: null, active: true },
+        { symbol: 'DOGEUSDT', price: null, signal: null, active: true },
+        { symbol: 'SUIUSDT', price: null, signal: null, active: true },
+        { symbol: 'NEARUSDT', price: null, signal: null, active: true },
+        { symbol: 'ATOMUSDT', price: null, signal: null, active: true },
       ],
       positions: [],
       logs: [
@@ -204,6 +256,9 @@ class ServerBotEngine {
       dataInterval: 10,
       analysisInterval: 30,
       serverStartedAt: new Date().toISOString(),
+      apiKey: '',
+      apiSecret: '',
+      binanceMode: 'paper',
       lastCheckAt: new Date().toISOString(),
       totalTradesExecuted: 0,
     };
@@ -217,7 +272,15 @@ class ServerBotEngine {
       if (fs.existsSync(this.stateFilePath)) {
         const raw = fs.readFileSync(this.stateFilePath, 'utf-8');
         const parsed = JSON.parse(raw);
+        const defaultWatchlist = this.state.watchlist;
         this.state = { ...this.state, ...parsed };
+        
+        // Merge missing symbols from default watchlist
+        for (const defaultItem of defaultWatchlist) {
+          if (!this.state.watchlist.find(item => item.symbol === defaultItem.symbol)) {
+            this.state.watchlist.push(defaultItem);
+          }
+        }
         console.log('[AI.TRADE Bot] State încărcat din bot_state.json pe server');
       }
     } catch (e) {
@@ -359,7 +422,38 @@ class ServerBotEngine {
     sendWebhookServer('telegram', this.state.telegramBotToken, chatId, reply);
   }
 
-  public executeTrade(symbol: string, action: 'BUY' | 'SELL', price: number, amount: number) {
+  public async executeTrade(symbol: string, action: 'BUY' | 'SELL', price: number, amount: number) {
+    let orderSuccess = true;
+    
+    if (this.state.binanceMode === 'testnet' || this.state.binanceMode === 'live') {
+      try {
+        const client = Binance({
+          apiKey: this.state.apiKey,
+          apiSecret: this.state.apiSecret,
+          httpBase: this.state.binanceMode === 'testnet' ? 'https://testnet.binance.vision' : 'https://api.binance.com'
+        });
+        
+        const order = await client.order({
+          symbol: symbol,
+          side: action as any,
+          type: 'MARKET' as any,
+          quantity: amount.toString()
+        });
+        
+        // If order successful, use the real executed price and quantity if needed
+        if (order && order.status === 'FILLED') {
+           // We might parse order fills, but we fall back to provided price
+        }
+      } catch (err: any) {
+        orderSuccess = false;
+        console.error('Binance Order Error:', err);
+        this.addLog(`Eroare Binance (${this.state.binanceMode}): ${err.message}`, 'warning', this.calculateEquity());
+        this.sendNotification(`❌ **Eroare Binance [${this.state.binanceMode}]**\nActiv: ${symbol}\nAcțiune: ${action}\nEroare: ${err.message}`);
+      }
+    }
+
+    if (!orderSuccess) return;
+
     const cost = price * amount;
     if (action === 'BUY' && this.state.balance >= cost) {
       const existing = this.state.positions.find(p => p.symbol === symbol);
@@ -578,13 +672,13 @@ class ServerBotEngine {
         // Stop Loss -5%
         if (pnlPercent <= -5) {
           this.addLog(`[Stop Loss Server] Ieșire din ${item.symbol} la $${livePrice} (PNL: ${pnlPercent.toFixed(2)}%)`, 'warning');
-          this.executeTrade(item.symbol, 'SELL', livePrice, pos.amount);
+          await this.executeTrade(item.symbol, 'SELL', livePrice, pos.amount);
           this.sendNotification(`🚨 **[Stop Loss]** Vândut automat ${item.symbol} la $${livePrice} (PNL -5%)`);
         } 
         // Take Profit +10%
         else if (pnlPercent >= 10) {
           this.addLog(`[Take Profit Server] Ieșire din ${item.symbol} la $${livePrice} (PNL: +${pnlPercent.toFixed(2)}%)`, 'success');
-          this.executeTrade(item.symbol, 'SELL', livePrice, pos.amount);
+          await this.executeTrade(item.symbol, 'SELL', livePrice, pos.amount);
           this.sendNotification(`🎯 **[Take Profit]** Vândut automat ${item.symbol} la $${livePrice} (PNL +10%)`);
         }
       }
@@ -595,7 +689,7 @@ class ServerBotEngine {
     for (const item of this.state.watchlist) {
       if (!item.active || !item.price) continue;
 
-      const signal = generateSignalServer(item.symbol, item.price);
+      const signal = await generateSignalServer(item.symbol, item.price);
       item.signal = signal;
 
       const pos = this.state.positions.find(p => p.symbol === item.symbol);
@@ -604,10 +698,10 @@ class ServerBotEngine {
       if (signal.action === 'BUY' && signal.prob >= 60 && !isHolding) {
         const amountToBuy = parseFloat((1000 / item.price).toFixed(6));
         this.addLog(`[Signal Server ML] ${item.symbol}: BUY (${signal.prob}% prob). Executăm cumpărare automat.`, 'info');
-        this.executeTrade(item.symbol, 'BUY', item.price, amountToBuy);
+        await this.executeTrade(item.symbol, 'BUY', item.price, amountToBuy);
       } else if (signal.action === 'SELL' && signal.prob >= 60 && isHolding) {
         this.addLog(`[Signal Server ML] ${item.symbol}: SELL (${signal.prob}% prob). Executăm vânzare automat.`, 'info');
-        this.executeTrade(item.symbol, 'SELL', item.price, pos!.amount);
+        await this.executeTrade(item.symbol, 'SELL', item.price, pos!.amount);
       }
     }
   }

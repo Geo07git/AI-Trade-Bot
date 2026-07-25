@@ -32,6 +32,7 @@ interface TradingStore {
   telegramBotToken: string;
   telegramChatId: string;
   timezone: string;
+  binanceMode: 'testnet' | 'live' | 'paper';
   reportConfig: {
     channels: { telegram: boolean; discord: boolean; browser: boolean };
     daily: { enabled: boolean; time: string };
@@ -58,6 +59,7 @@ interface TradingStore {
   setTelegramBotToken: (token: string) => void;
   setTelegramChatId: (id: string) => void;
   setTimezone: (timezone: string) => void;
+  setBinanceMode: (mode: 'testnet' | 'live' | 'paper') => void;
   setReportConfig: (config: Partial<TradingStore['reportConfig']>) => void;
 }
 
@@ -68,8 +70,20 @@ export const useTradingStore = create<TradingStore>()(
   initialBalance: 10000,
   watchlist: [
     { symbol: 'BTCUSDT', price: null, signal: null, active: true },
-    { symbol: 'ETHUSDT', price: null, signal: null, active: false },
-    { symbol: 'SOLUSDT', price: null, signal: null, active: false },
+    { symbol: 'ETHUSDT', price: null, signal: null, active: true },
+    { symbol: 'BNBUSDT', price: null, signal: null, active: true },
+    { symbol: 'SOLUSDT', price: null, signal: null, active: true },
+    { symbol: 'XRPUSDT', price: null, signal: null, active: true },
+    { symbol: 'ADAUSDT', price: null, signal: null, active: true },
+    { symbol: 'LINKUSDT', price: null, signal: null, active: true },
+    { symbol: 'AVAXUSDT', price: null, signal: null, active: true },
+    { symbol: 'DOGEUSDT', price: null, signal: null, active: true },
+    { symbol: 'SUIUSDT', price: null, signal: null, active: true },
+    { symbol: 'NEARUSDT', price: null, signal: null, active: true },
+    { symbol: 'ATOMUSDT', price: null, signal: null, active: true },
+    { symbol: 'ZAMAUSDT', price: null, signal: null, active: true },
+    { symbol: 'DEXEUSDT', price: null, signal: null, active: true },
+    { symbol: 'ACEUSDT', price: null, signal: null, active: true },
   ],
   positions: [],
   logs: [],
@@ -84,6 +98,7 @@ export const useTradingStore = create<TradingStore>()(
   telegramBotToken: '',
   telegramChatId: '',
   timezone: 'Europe/Bucharest',
+  binanceMode: 'paper',
   reportConfig: {
     channels: { telegram: true, discord: false, browser: false },
     daily: { enabled: true, time: '21:00' },
@@ -276,6 +291,14 @@ export const useTradingStore = create<TradingStore>()(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ timezone })
+    }).catch(() => {});
+  },
+  setBinanceMode: (mode) => {
+    set({ binanceMode: mode });
+    fetch('/api/bot/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ binanceMode: mode })
     }).catch(() => {});
   },
   setReportConfig: (config) => set((state) => {

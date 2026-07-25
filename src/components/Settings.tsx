@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTradingStore } from '../store';
 import { requestNotificationPermission } from '../services/notifications';
+import { NotificationDiagnostic } from './NotificationDiagnostic';
 
 export function Settings() {
   const { 
@@ -24,11 +25,22 @@ export function Settings() {
     telegramBotToken,
     setTelegramBotToken,
     telegramChatId,
-    setTelegramChatId
+    setTelegramChatId,
+    binanceMode,
+    setBinanceMode
   } = useTradingStore();
 
   const handleEnablePush = async () => {
-    await requestNotificationPermission();
+    try {
+      const granted = await requestNotificationPermission();
+      if (granted) {
+        alert("Notificările sunt acum activate!");
+      } else {
+        alert("Nu s-a putut obține permisiunea pentru notificări.\n\nNOTĂ: Dacă te afli în preview-ul integrat, browserele blochează deseori ferestrele pop-up pentru notificări din iframe-uri.\n\nTe rog să deschizi aplicația într-un tab nou (folosind butonul de 'Open in new tab' din dreapta sus) și să încerci din nou.");
+      }
+    } catch (err) {
+      alert("Eroare la solicitarea notificărilor. Te rog deschide aplicația într-un tab nou și încearcă din nou.");
+    }
   };
 
   return (
@@ -105,7 +117,32 @@ export function Settings() {
 
         <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-6">
           <h3 className="text-lg font-serif text-zinc-200 mb-4">Conectare Exchange (API Keys)</h3>
-          <p className="text-sm text-zinc-400 mb-4">Introdu cheile API pentru a permite botului să execute tranzacții reale pe bursa ta. Pentru moment, cheile sunt stocate doar local în browser.</p>
+          <p className="text-sm text-zinc-400 mb-4">Introdu cheile API pentru a permite botului să execute tranzacții. Pentru siguranță, dezactivează permisiunile de Withdraw (retragere).</p>
+          
+          <div className="mb-6">
+            <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-2 font-sans">Mod de Funcționare</label>
+            <div className="flex gap-2">
+              {(['paper', 'testnet', 'live'] as const).map(mode => (
+                <button
+                  key={mode}
+                  onClick={() => setBinanceMode(mode)}
+                  className={`flex-1 px-4 py-2 rounded-lg text-sm transition-colors border ${
+                    binanceMode === mode 
+                    ? (mode === 'live' ? 'bg-red-500/10 text-red-400 border-red-500/30' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30') 
+                    : 'bg-zinc-800/40 text-zinc-300 border-white/5 hover:bg-white/5'
+                  }`}
+                >
+                  {mode === 'paper' ? 'Paper Trading (Demo Local)' : mode === 'testnet' ? 'Binance Testnet' : 'Binance Real (LIVE)'}
+                </button>
+              ))}
+            </div>
+            {binanceMode === 'live' && (
+              <p className="text-xs text-red-400 mt-2 bg-red-500/10 p-2 rounded border border-red-500/20">
+                Atenție: Ești în modul LIVE. Tranzacțiile vor fi efectuate cu fonduri reale pe Binance! Începe cu sume mici!
+              </p>
+            )}
+          </div>
+
           <div className="space-y-4">
             <div>
               <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-1 font-sans">API Key</label>
@@ -231,14 +268,18 @@ export function Settings() {
           </div>
         </div>
 
-        <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-6">
-          <h3 className="text-lg font-serif text-zinc-200 mb-4">Notificări Push Desktop</h3>
-          <p className="text-sm text-zinc-400 mb-4">Primește notificări push direct pe desktop atunci când AI-ul execută o tranzacție automată de cumpărare sau vânzare.</p>
-          <button 
-            onClick={handleEnablePush}
-            className="px-4 py-2 bg-zinc-100 hover:bg-white text-zinc-900 font-semibold rounded-lg text-sm transition-colors">
-            Activează Notificările
-          </button>
+        <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-6 space-y-6">
+          <div>
+            <h3 className="text-lg font-serif text-zinc-200 mb-2">Notificări Push Desktop</h3>
+            <p className="text-sm text-zinc-400 mb-4">Primește notificări push direct pe desktop atunci când AI-ul execută o tranzacție automată de cumpărare sau vânzare.</p>
+            <button 
+              onClick={handleEnablePush}
+              className="px-4 py-2 bg-zinc-100 hover:bg-white text-zinc-900 font-semibold rounded-lg text-sm transition-colors">
+              Activează Notificările
+            </button>
+          </div>
+
+          <NotificationDiagnostic />
         </div>
       </div>
     </div>

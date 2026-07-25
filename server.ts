@@ -29,10 +29,10 @@ async function startServer() {
     res.json({ success: true, state: botEngine.state });
   });
 
-  app.post('/api/bot/trade', (req, res) => {
+  app.post('/api/bot/trade', async (req, res) => {
     const { symbol, action, price, amount } = req.body;
     if (symbol && action && price && amount) {
-      botEngine.executeTrade(symbol, action, price, amount);
+      await botEngine.executeTrade(symbol, action, price, amount);
       return res.json({ success: true, state: botEngine.state });
     }
     res.status(400).json({ error: 'Missing parameters' });

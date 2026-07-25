@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { ViewState } from './types';
@@ -36,6 +36,7 @@ export default function App() {
 
   const [dataCountdown, setDataCountdown] = useState(dataInterval);
   const [analysisCountdown, setAnalysisCountdown] = useState(analysisInterval);
+  const lastLogRef = useRef<{time: string, message: string} | null>(null);
 
   // Poll server background bot engine state every 3 seconds
   useEffect(() => {
@@ -44,6 +45,17 @@ export default function App() {
         const res = await fetch('/api/bot/state');
         if (res.ok) {
           const data = await res.json();
+          
+          if (data.logs && data.logs.length > 0) {
+            const currentLatestLog = data.logs[0];
+            if (lastLogRef.current && (lastLogRef.current.time !== currentLatestLog.time || lastLogRef.current.message !== currentLatestLog.message)) {
+              if (currentLatestLog.type === 'success' || currentLatestLog.type === 'warning') {
+                sendWebPush('AI.TRADE Semnal', currentLatestLog.message);
+              }
+            }
+            lastLogRef.current = currentLatestLog;
+          }
+
           // Sync server state to Zustand store
           useTradingStore.setState({
             balance: data.balance,
