@@ -1,4 +1,4 @@
-export type ViewState = 'dashboard' | 'strategies' | 'backtesting' | 'analyst' | 'news' | 'alerts' | 'logs' | 'settings' | 'guide';
+export type ViewState = 'dashboard' | 'strategyLab' | 'strategies' | 'backtesting' | 'analyst' | 'news' | 'alerts' | 'logs' | 'settings' | 'guide';
 
 export interface NewsArticle {
   id: string;

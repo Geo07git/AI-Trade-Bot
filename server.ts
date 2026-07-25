@@ -3,12 +3,51 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { botEngine } from './server/bot';
+import { strategyLab } from './server/strategyLab';
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
+
+  // AI Strategy Lab API Routes
+  app.get('/api/lab/state', (req, res) => {
+    res.json({
+      regime: strategyLab.getRegime(),
+      stats: strategyLab.getPipelineStats(),
+      strategies: strategyLab.getStrategies()
+    });
+  });
+
+  app.post('/api/lab/generate', (req, res) => {
+    const { count = 100, prompt } = req.body;
+    const result = strategyLab.generateAndValidateBatch(Number(count), prompt);
+    res.json({
+      success: true,
+      newCount: result.newStrategies.length,
+      stats: result.stats,
+      strategies: strategyLab.getStrategies()
+    });
+  });
+
+  app.post('/api/lab/promote', (req, res) => {
+    const { id, targetStatus } = req.body;
+    if (id && targetStatus) {
+      strategyLab.promoteStrategy(id, targetStatus);
+      return res.json({ success: true, strategies: strategyLab.getStrategies() });
+    }
+    res.status(400).json({ error: 'Missing strategy id or targetStatus' });
+  });
+
+  app.post('/api/lab/regime', (req, res) => {
+    const { regime } = req.body;
+    if (regime) {
+      strategyLab.setRegime(regime);
+      return res.json({ success: true, regime: strategyLab.getRegime() });
+    }
+    res.status(400).json({ error: 'Missing regime' });
+  });
 
   // Background 24/7 Bot API Endpoints
   app.get('/api/bot/state', (req, res) => {
@@ -191,7 +230,7 @@ async function startServer() {
       });
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.6-flash',
         contents: `You are an AI trading analyst system. Analyze the following market context and answer the user's prompt.  
 If the user is asking for analysis on a specific asset or a trading signal, you MUST reply in the following EXACT Markdown format, replacing the bracketed values with your calculated data:
 

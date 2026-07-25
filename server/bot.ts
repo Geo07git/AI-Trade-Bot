@@ -288,6 +288,9 @@ class ServerBotEngine {
         { symbol: 'SUIUSDT', price: null, signal: null, active: true },
         { symbol: 'NEARUSDT', price: null, signal: null, active: true },
         { symbol: 'ATOMUSDT', price: null, signal: null, active: true },
+        { symbol: 'ZAMAUSDT', price: null, signal: null, active: true },
+        { symbol: 'DEXEUSDT', price: null, signal: null, active: true },
+        { symbol: 'ACEUSDT', price: null, signal: null, active: true },
       ],
       positions: [],
       logs: [
@@ -332,6 +335,11 @@ class ServerBotEngine {
         const defaultWatchlist = this.state.watchlist;
         this.state = { ...this.state, ...parsed };
         
+        // Ensure initialBalance is valid
+        if (!this.state.initialBalance || this.state.initialBalance > this.state.balance * 10) {
+          this.state.initialBalance = this.state.balance || 500;
+        }
+
         // Auto-adjust legacy $10,000 portfolio to $100 if initial balance was default
         if (this.state.initialBalance === 10000 || this.state.balance === 10000) {
           this.state.balance = 100;
@@ -810,11 +818,15 @@ class ServerBotEngine {
       const isHolding = pos && pos.amount > 0;
 
       if (signal.action === 'BUY' && signal.prob >= 60 && !isHolding) {
-        const allocation = Math.min(1000, Math.max(0, this.state.balance));
-        if (allocation >= 10) {
+        const equity = this.calculateEquity();
+        // Allocate 20% of total equity per position (min $10, capped at available cash balance)
+        const targetAllocation = Math.max(10, parseFloat((equity * 0.20).toFixed(2)));
+        const allocation = Math.min(this.state.balance, targetAllocation);
+
+        if (allocation >= 10 && this.state.balance >= 10) {
           const amountToBuy = parseFloat((allocation / item.price).toFixed(6));
           if (amountToBuy > 0) {
-            this.addLog(`[Signal Server ML] ${item.symbol}: BUY (${signal.prob}% prob). Executăm cumpărare automat.`, 'info');
+            this.addLog(`[Signal Server ML] ${item.symbol}: BUY (${signal.prob}% prob). Alocare 20% ($${allocation.toFixed(2)}). Executăm cumpărare.`, 'info');
             await this.executeTrade(item.symbol, 'BUY', item.price, amountToBuy);
           }
         }

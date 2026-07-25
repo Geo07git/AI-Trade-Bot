@@ -8,6 +8,7 @@ function cn(...inputs: (string | undefined | null | false)[]) {
 }
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
+import { AIStrategyLab } from './components/AIStrategyLab';
 import { AIAnalyst } from './components/AIAnalyst';
 import { TradeLogs } from './components/TradeLogs';
 import { Strategies } from './components/Strategies';
@@ -60,6 +61,7 @@ export default function App() {
           // Sync server state to Zustand store
           useTradingStore.setState({
             balance: data.balance,
+            initialBalance: data.initialBalance ?? data.balance,
             positions: data.positions,
             logs: data.logs,
             watchlist: data.watchlist,
@@ -161,6 +163,7 @@ export default function App() {
       
       <main className="flex-1 h-full overflow-hidden relative">
         {currentView === 'dashboard' && <Dashboard />}
+        {currentView === 'strategyLab' && <AIStrategyLab />}
         {currentView === 'strategies' && <Strategies />}
         {currentView === 'analyst' && <AIAnalyst />}
         {currentView === 'news' && <NewsFeed />}

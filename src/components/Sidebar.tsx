@@ -20,6 +20,7 @@ export function Sidebar({ currentView, onViewChange, isOpenMobile, onCloseMobile
   const { autoTradingActive, setAutoTradingActive } = useTradingStore();
   const navItems: { id: ViewState; label: string }[] = [
     { id: 'dashboard', label: 'Dashboard' },
+    { id: 'strategyLab', label: 'AI Strategy Lab' },
     { id: 'strategies', label: 'ML Strategies' },
     { id: 'backtesting', label: 'Backtesting' },
     { id: 'analyst', label: 'AI Analyst' },

@@ -19,6 +19,78 @@ export function UserGuide() {
       <div className="p-8 overflow-y-auto flex-1 pb-32">
         <div className="max-w-4xl mx-auto space-y-8">
           
+          {/* AI Strategy Lab Section */}
+          <section className="bg-zinc-900/50 border border-emerald-500/20 rounded-2xl p-8 hover:border-emerald-500/40 transition-colors">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-400">
+                <span className="font-mono text-sm font-bold">LAB</span>
+              </div>
+              <div>
+                <h2 className="font-serif text-2xl text-white">AI Strategy Lab & Pipeline-ul de Validare</h2>
+                <p className="text-xs text-emerald-400 font-mono mt-0.5">Arhitectură Hibridă: LLM Generativ + ML Predictiv (Random Forest / XGB / LGBM)</p>
+              </div>
+            </div>
+
+            <p className="text-zinc-400 font-sans leading-relaxed text-sm mb-6">
+              Platforma separă rolul de <strong>Cercetător (AI Strategy Lab)</strong> de cel de <strong>Evaluator/Executant (ML Ensemble & Bot 24/7)</strong>. În loc ca AI-ul să încerce să ghicească direct piața, el generează ipoteze de tranzacționare care sunt apoi filtrate matematic și statistic în 7 stadii riguroase.
+            </p>
+
+            <div className="space-y-6">
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0 border border-amber-500/20 text-amber-400 font-serif">1</div>
+                <div>
+                  <h3 className="font-serif text-lg text-zinc-200 mb-1">Generare Ipoteze (100–1000 Strategii)</h3>
+                  <p className="text-sm text-zinc-400 font-sans leading-relaxed">
+                    AI Strategy Lab folosește modele LLM pentru a combina indicatori tehnici (EMA, RSI, ADX, VWAP, Bollinger, Volume Spikes, Supertrend) în reguli explicite de intrare/ieșire adaptate pe regimuri specifice de piață.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center shrink-0 border border-blue-500/20 text-blue-400 font-serif">2</div>
+                <div>
+                  <h3 className="font-serif text-lg text-zinc-200 mb-1">Backtest Rapid & Evaluare ML Ensemble</h3>
+                  <p className="text-sm text-zinc-400 font-sans leading-relaxed">
+                    Fiecare ipoteză este supusă unui backtest pentru a verifica Profit Factor (&gt; 1.35) și Win Rate (&gt; 50%). Semnalele generate sunt evaluate de un ansamblu de 3 modele ML:
+                    <br />• <strong>Random Forest (RF)</strong> - Excelent pentru detecția piețelor laterale și inversări de trend.
+                    <br />• <strong>XGBoost</strong> - Optimizat pentru tranzacții de momentum și breakout-uri de volum.
+                    <br />• <strong>LightGBM</strong> - Filtrul rapid de clasificare a riscului și volatilității.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-purple-500/10 flex items-center justify-center shrink-0 border border-purple-500/20 text-purple-400 font-serif">3</div>
+                <div>
+                  <h3 className="font-serif text-lg text-zinc-200 mb-1">Walk-Forward (5 Ferestre Out-Of-Sample) & Monte Carlo</h3>
+                  <p className="text-sm text-zinc-400 font-sans leading-relaxed">
+                    Strategiile care trec de ML sunt testate pe 5 perioade de timp neobservate (out-of-sample). Ulterior, o simulare Monte Carlo cu 1.000 de permutări aleatorii măsoară riscul maxim de scădere (Value-at-Risk 95% &lt; 6.0%).
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-orange-500/10 flex items-center justify-center shrink-0 border border-orange-500/20 text-orange-400 font-serif">4</div>
+                <div>
+                  <h3 className="font-serif text-lg text-zinc-200 mb-1">Paper Trading & Promovare Automată în Botul Live</h3>
+                  <p className="text-sm text-zinc-400 font-sans leading-relaxed">
+                    Strategiile valide ajung în stadiul de <strong>Paper Trading</strong> (100–200 tranzacții virtuale fără risc). Doar strategiile cu <strong>Total Score &ge; 85/100</strong> primesc eticheta <strong>LIVE READY</strong> și sunt executate automat de motorul Server 24/7.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-indigo-500/10 flex items-center justify-center shrink-0 border border-indigo-500/20 text-indigo-400 font-serif">5</div>
+                <div>
+                  <h3 className="font-serif text-lg text-zinc-200 mb-1">Detectarea Regimului Pieței (Market Regime Detector)</h3>
+                  <p className="text-sm text-zinc-400 font-sans leading-relaxed">
+                    Sistemul clasifică în mod dinamic piața (<em>SIDEWAYS_RANGE, TRENDING_BULL, TRENDING_BEAR, HIGH_VOLATILITY, LOW_VOLATILITY</em>) și activează prioritar strategiile optimizate pentru contextul curent.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <section className="bg-zinc-900/50 border border-white/5 rounded-2xl p-8 hover:border-white/10 transition-colors">
             <h2 className="font-serif text-2xl text-white mb-4">Arhitectură Server-Side 24/7</h2>
             <p className="text-zinc-400 font-sans leading-relaxed text-sm mb-6">
