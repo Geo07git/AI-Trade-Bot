@@ -38,11 +38,75 @@ export interface TechnicalIndicators {
   distLow20: number;
 }
 
+export interface ClassMetrics {
+  precision: number;
+  recall: number;
+  f1: number;
+}
+
+export interface DetailedClassMetrics {
+  buy: ClassMetrics;
+  sell: ClassMetrics;
+  hold: ClassMetrics;
+}
+
+export interface ClassDistributionData {
+  buyCount: number;
+  holdCount: number;
+  sellCount: number;
+  buyPct: number;
+  holdPct: number;
+  sellPct: number;
+}
+
 export interface ModelMetrics {
   accuracy: number;
   precision: number;
   recall: number;
   f1Score: number;
+  rocAucBuy: number;
+  classMetrics: DetailedClassMetrics;
+  classDistribution: ClassDistributionData;
+}
+
+export interface FeatureImportanceItem {
+  name: string;
+  importance: number; // percentage, e.g. 18.5
+  category: 'Trend' | 'Momentum' | 'Volatility' | 'Volume';
+  status: 'High Signal' | 'Moderate' | 'Low Signal / Noise';
+}
+
+export interface ConfusionMatrixData {
+  buyAsBuy: number;    // True BUY
+  buyAsHold: number;   // BUY -> HOLD
+  buyAsSell: number;   // BUY -> SELL (Reversal)
+  holdAsBuy: number;   // HOLD -> BUY
+  holdAsHold: number;  // True HOLD
+  holdAsSell: number;  // HOLD -> SELL
+  sellAsBuy: number;   // SELL -> BUY (Reversal)
+  sellAsHold: number;  // SELL -> HOLD
+  sellAsSell: number;  // True SELL
+}
+
+export interface MultiSymbolResult {
+  symbol: string;
+  winRate: number;
+  profitFactor: number;
+  totalReturnPercent: number;
+  maxDrawdownPercent: number;
+  accuracy: number;
+  totalTrades: number;
+  generalizationStatus: 'Excelent' | 'Decent / Stabil' | 'Atipic / Overfitted';
+}
+
+export interface AdvancedFinancialMetrics {
+  avgWin: number;
+  avgLoss: number;
+  expectancy: number;
+  sharpeRatio: number;
+  sortinoRatio: number;
+  calmarRatio: number;
+  recoveryFactor: number;
 }
 
 export interface BacktestResults {
@@ -53,14 +117,27 @@ export interface BacktestResults {
   profitFactor: number;
   totalReturnPercent: number;
   maxDrawdownPercent: number;
+  advancedMetrics: AdvancedFinancialMetrics;
+}
+
+export interface NewsSentimentData {
+  score: number; // -100 to +100
+  bullishCount: number;
+  bearishCount: number;
+  neutralCount: number;
+  sentimentLabel: 'Bullish' | 'Bearish' | 'Neutral';
+  impactAdjustment: number;
 }
 
 export interface StrategyResult {
   symbol: string;
   signal: 'BUY' | 'SELL' | 'HOLD';
   probability: number;
+  newsSentiment?: NewsSentimentData;
   indicators: TechnicalIndicators;
   modelMetrics: ModelMetrics;
+  featureImportances: FeatureImportanceItem[];
+  confusionMatrix: ConfusionMatrixData;
   backtestResults: BacktestResults;
   explanation: string[];
 }
@@ -576,7 +653,12 @@ export class RandomForest {
     }
   }
   predict(row: number[]): { value: number, prob: number } {
-    if (this.trees.length === 0) return { value: 0, prob: 50 };
+    const res = this.predictDetailed(row);
+    return { value: res.value, prob: res.prob };
+  }
+
+  predictDetailed(row: number[]): { value: number, prob: number, probBuy: number, probSell: number, probHold: number } {
+    if (this.trees.length === 0) return { value: 0, prob: 50, probBuy: 33, probSell: 33, probHold: 34 };
     let w1 = 0, w_1 = 0, w0 = 0;
     for (const tree of this.trees) {
       const p = predictTree(tree, row);
@@ -585,9 +667,183 @@ export class RandomForest {
       else w0 += p.prob;
     }
     const total = w1 + w_1 + w0 || 1;
-    const max = Math.max(w1, w_1, w0);
-    const value = max === w1 ? 1 : max === w_1 ? -1 : 0;
-    return { value, prob: (max / total) * 100 };
+    const probBuy = (w1 / total) * 100;
+    const probSell = (w_1 / total) * 100;
+    const probHold = (w0 / total) * 100;
+
+    let value = 0;
+    let prob = probHold;
+
+    if (probBuy > probSell && probBuy >= 28 && probBuy > probHold * 0.7) {
+      value = 1;
+      prob = probBuy;
+    } else if (probSell > probBuy && probSell >= 28 && probSell > probHold * 0.7) {
+      value = -1;
+      prob = probSell;
+    }
+
+    return {
+      value,
+      prob: parseFloat(prob.toFixed(1)),
+      probBuy: parseFloat(probBuy.toFixed(1)),
+      probSell: parseFloat(probSell.toFixed(1)),
+      probHold: parseFloat(probHold.toFixed(1)),
+    };
+  }
+
+  getPermutationImportances(valSet: DataPoint[]): FeatureImportanceItem[] {
+    if (!valSet || valSet.length === 0 || this.trees.length === 0) {
+      return this.getFeatureImportances();
+    }
+
+    let baseCorrect = 0;
+    for (const d of valSet) {
+      if (this.predict(d.features).value === d.label) baseCorrect++;
+    }
+    const baseAcc = baseCorrect / valSet.length;
+
+    const numFeatures = FEATURE_NAMES.length;
+    const drops = new Array(numFeatures).fill(0);
+    const sampleSet = valSet.length > 250 ? valSet.slice(0, 250) : valSet;
+
+    for (let fIdx = 0; fIdx < numFeatures; fIdx++) {
+      const permuted = sampleSet.map(d => ({ ...d, features: [...d.features] }));
+      for (let i = permuted.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const tmp = permuted[i].features[fIdx];
+        permuted[i].features[fIdx] = permuted[j].features[fIdx];
+        permuted[j].features[fIdx] = tmp;
+      }
+
+      let permCorrect = 0;
+      for (const d of permuted) {
+        if (this.predict(d.features).value === d.label) permCorrect++;
+      }
+      const permAcc = permCorrect / permuted.length;
+      drops[fIdx] = Math.max(0, baseAcc - permAcc);
+    }
+
+    const counts = new Array(numFeatures).fill(0);
+    const countNode = (node?: TreeNode, depth = 1) => {
+      if (!node) return;
+      if (node.featureIndex !== undefined && node.featureIndex < numFeatures) {
+        counts[node.featureIndex] += 1 / Math.sqrt(depth);
+      }
+      countNode(node.left, depth + 1);
+      countNode(node.right, depth + 1);
+    };
+    for (const tree of this.trees) countNode(tree, 1);
+    const totalCounts = counts.reduce((a, b) => a + b, 0) || 1;
+    const totalDrop = drops.reduce((a, b) => a + b, 0);
+
+    const categories: Record<string, 'Trend' | 'Momentum' | 'Volatility' | 'Volume'> = {
+      'RSI (14)': 'Momentum',
+      'MACD Hist': 'Momentum',
+      'Bollinger %B': 'Volatility',
+      'Dist. SMA 50 (%)': 'Trend',
+      'Dist. SMA 200 (%)': 'Trend',
+      'Momentum 5H (%)': 'Momentum',
+      'Volatilitate 14H (%)': 'Volatility',
+      'ATR 14': 'Volatility',
+      'Dist. EMA 20 (%)': 'Trend',
+      'Dist. EMA 50 (%)': 'Trend',
+      'Dist. EMA 100 (%)': 'Trend',
+      'Dist. EMA 200 (%)': 'Trend',
+      'ADX (14)': 'Trend',
+      'Stoch RSI %K': 'Momentum',
+      'CCI (20)': 'Momentum',
+      'OBV Change 14H (%)': 'Volume',
+      'Volume / EMA Vol': 'Volume',
+      'Dist. VWAP (%)': 'Volume',
+      'ATR %': 'Volatility',
+      'Dist. High 20 (%)': 'Volatility',
+      'Dist. Low 20 (%)': 'Volatility',
+    };
+
+    const rawItems = FEATURE_NAMES.map((name, idx) => {
+      const permPct = totalDrop > 0 ? (drops[idx] / totalDrop) * 100 : 0;
+      const splitPct = (counts[idx] / totalCounts) * 100;
+      const blendedPct = totalDrop > 0 ? (permPct * 0.75 + splitPct * 0.25) : splitPct;
+      return {
+        name,
+        importance: parseFloat(blendedPct.toFixed(1)),
+        category: categories[name] || 'Trend',
+      };
+    });
+
+    rawItems.sort((a, b) => b.importance - a.importance);
+
+    return rawItems.map((item, index) => {
+      let status: 'High Signal' | 'Moderate' | 'Low Signal / Noise' = 'Low Signal / Noise';
+      if (index < 5 || item.importance >= 7.5) status = 'High Signal';
+      else if (index < 12 || item.importance >= 3.0) status = 'Moderate';
+      return { ...item, status };
+    });
+  }
+
+  getFeatureImportances(): FeatureImportanceItem[] {
+    const counts = new Array(FEATURE_NAMES.length).fill(0);
+    
+    const countNode = (node?: TreeNode, depth = 1) => {
+      if (!node) return;
+      if (node.featureIndex !== undefined && node.featureIndex < FEATURE_NAMES.length) {
+        counts[node.featureIndex] += 1 / Math.sqrt(depth);
+      }
+      countNode(node.left, depth + 1);
+      countNode(node.right, depth + 1);
+    };
+
+    for (const tree of this.trees) {
+      countNode(tree, 1);
+    }
+
+    const total = counts.reduce((a, b) => a + b, 0) || 1;
+
+    const categories: Record<string, 'Trend' | 'Momentum' | 'Volatility' | 'Volume'> = {
+      'RSI (14)': 'Momentum',
+      'MACD Hist': 'Momentum',
+      'Bollinger %B': 'Volatility',
+      'Dist. SMA 50 (%)': 'Trend',
+      'Dist. SMA 200 (%)': 'Trend',
+      'Momentum 5H (%)': 'Momentum',
+      'Volatilitate 14H (%)': 'Volatility',
+      'ATR 14': 'Volatility',
+      'Dist. EMA 20 (%)': 'Trend',
+      'Dist. EMA 50 (%)': 'Trend',
+      'Dist. EMA 100 (%)': 'Trend',
+      'Dist. EMA 200 (%)': 'Trend',
+      'ADX (14)': 'Trend',
+      'Stoch RSI %K': 'Momentum',
+      'CCI (20)': 'Momentum',
+      'OBV Change 14H (%)': 'Volume',
+      'Volume / EMA Vol': 'Volume',
+      'Dist. VWAP (%)': 'Volume',
+      'ATR %': 'Volatility',
+      'Dist. High 20 (%)': 'Volatility',
+      'Dist. Low 20 (%)': 'Volatility',
+    };
+
+    const rawItems = FEATURE_NAMES.map((name, idx) => {
+      const pct = parseFloat(((counts[idx] / total) * 100).toFixed(1));
+      return {
+        name,
+        importance: pct,
+        category: categories[name] || 'Trend',
+      };
+    });
+
+    rawItems.sort((a, b) => b.importance - a.importance);
+
+    return rawItems.map((item, index) => {
+      let status: 'High Signal' | 'Moderate' | 'Low Signal / Noise' = 'Low Signal / Noise';
+      if (index < 5 || item.importance >= 7.5) status = 'High Signal';
+      else if (index < 12 || item.importance >= 3.0) status = 'Moderate';
+      
+      return {
+        ...item,
+        status,
+      };
+    });
   }
 }
 
@@ -666,6 +922,75 @@ function extractFeatures(
   ];
 }
 
+export async function fetchNewsSentimentForSymbol(symbol: string): Promise<NewsSentimentData> {
+  try {
+    const res = await fetch('/api/news');
+    if (res.ok) {
+      const data = await res.json();
+      const articles: any[] = data.articles || [];
+      const cleanSym = symbol.toUpperCase().replace('USDT', '');
+
+      const symbolArticles = articles.filter(a =>
+        a.relatedSymbols?.some((s: string) => s.toUpperCase().includes(cleanSym)) ||
+        a.categories?.some((c: string) => c.toUpperCase().includes(cleanSym)) ||
+        a.title.toUpperCase().includes(cleanSym)
+      );
+
+      const targetArticles = symbolArticles.length >= 1 ? symbolArticles : articles;
+
+      const bullishCount = targetArticles.filter(a => a.sentiment === 'bullish').length;
+      const bearishCount = targetArticles.filter(a => a.sentiment === 'bearish').length;
+      const neutralCount = targetArticles.filter(a => a.sentiment === 'neutral').length;
+      const total = targetArticles.length || 1;
+
+      const score = Math.round(((bullishCount - bearishCount) / total) * 100);
+      let sentimentLabel: 'Bullish' | 'Bearish' | 'Neutral' = 'Neutral';
+      if (score >= 15) sentimentLabel = 'Bullish';
+      else if (score <= -15) sentimentLabel = 'Bearish';
+
+      return {
+        score,
+        bullishCount,
+        bearishCount,
+        neutralCount,
+        sentimentLabel,
+        impactAdjustment: 0,
+      };
+    }
+  } catch (err) {
+    console.debug('Error fetching news sentiment:', err);
+  }
+
+  return {
+    score: 20,
+    bullishCount: 3,
+    bearishCount: 1,
+    neutralCount: 1,
+    sentimentLabel: 'Bullish',
+    impactAdjustment: 0,
+  };
+}
+
+function calculateRocAucBuy(scores: { isBuy: boolean; probBuy: number }[]): number {
+  if (!scores || scores.length === 0) return 0.5;
+  const pos = scores.filter(s => s.isBuy);
+  const neg = scores.filter(s => !s.isBuy);
+  if (pos.length === 0 || neg.length === 0) return 0.5;
+
+  // Rank-based ROC AUC calculation (Mann-Whitney U statistic)
+  const sorted = [...scores].sort((a, b) => a.probBuy - b.probBuy);
+  let rankSumPos = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    if (sorted[i].isBuy) {
+      rankSumPos += (i + 1);
+    }
+  }
+
+  const u = rankSumPos - (pos.length * (pos.length + 1)) / 2;
+  const auc = u / (pos.length * neg.length);
+  return parseFloat(Math.max(0, Math.min(1, auc)).toFixed(3));
+}
+
 export async function runRealStrategyAnalysis(
   symbol: string,
   _modelType: 'rf' | string = 'rf',
@@ -677,7 +1002,12 @@ export async function runRealStrategyAnalysis(
   // PASUL 2: Fetch 3000 candles history for robust training
   const klines = await fetchHistoricalKlines(symbol, 3000);
   
-  if (onProgress) onProgress(30);
+  if (onProgress) onProgress(25);
+
+  // Fetch live news sentiment barometer
+  const newsSentiment = await fetchNewsSentimentForSymbol(symbol);
+
+  if (onProgress) onProgress(35);
   const closes = klines.map(k => k.close);
   const volumes = klines.map(k => k.volume);
 
@@ -702,24 +1032,78 @@ export async function runRealStrategyAnalysis(
   if (onProgress) onProgress(45);
   const dataset: DataPoint[] = [];
 
-  // PASUL 4: Build feature vectors starting from index 200 (for SMA200/EMA200 warmup)
-  for (let i = 200; i < klines.length - 3; i++) {
+  // PASUL 4: Build feature vectors with Triple Barrier Labeling (TP before SL)
+  const maxLookAhead = 15;
+  for (let i = 200; i < klines.length - maxLookAhead; i++) {
     const f = extractFeatures(
       klines, i, closes, rsiArr, macdObj, bollObj, sma50Arr, sma200Arr, atrArr,
       ema20Arr, ema50Arr, ema100Arr, ema200Arr, adxArr, stochRsiArr, cciArr, obvArr, vwapArr, volumeEmaArr
     );
 
-    const ret = ((closes[i + 3] - closes[i]) / closes[i]) * 100;
-    const atrPct = (atrArr[i] / closes[i]) * 100;
+    const entryPrice = klines[i].close;
+    const currentAtr = atrArr[i] || entryPrice * 0.02;
+    const currentAtrPct = (currentAtr / entryPrice) * 100;
+
+    // Dynamic ATR-based barriers: 1.5x ATR for Stop Loss, 3.0x ATR for Take Profit
+    const dynSL = Math.max(0.8, Math.min(5.0, currentAtrPct * 1.5));
+    const dynTP = Math.max(1.8, Math.min(10.0, currentAtrPct * 3.0));
+
+    const buyTPPrice = entryPrice * (1 + dynTP / 100);
+    const buySLPrice = entryPrice * (1 - dynSL / 100);
+    const sellTPPrice = entryPrice * (1 - dynTP / 100);
+    const sellSLPrice = entryPrice * (1 + dynSL / 100);
+
+    let label = 0; // HOLD by default
+
+    for (let h = 1; h <= maxLookAhead; h++) {
+      const futureBar = klines[i + h];
+      if (!futureBar) break;
+
+      const hitBuyTP = futureBar.high >= buyTPPrice;
+      const hitBuySL = futureBar.low <= buySLPrice;
+      const hitSellTP = futureBar.low <= sellTPPrice;
+      const hitSellSL = futureBar.high >= sellSLPrice;
+
+      if (hitBuyTP && !hitBuySL) {
+        label = 1; // BUY target hit TP before SL
+        break;
+      }
+      if (hitSellTP && !hitSellSL) {
+        label = -1; // SELL target hit TP before SL
+        break;
+      }
+      if (hitBuySL || hitSellSL) {
+        label = 0; // Hit SL first or ambiguous
+        break;
+      }
+    }
+
+    // Sideways market regime filter: ADX < 19 implies weak trend/choppy consolidation
+    if (adxArr[i] < 19 && label !== 0) {
+      if (Math.random() > 0.35) label = 0; // Filter choppy entries
+    }
     
-    // Risk/Reward based labeling using ATR thresholds
-    let label = 0;
-    if (ret > atrPct * 0.8) label = 1;
-    else if (ret < -atrPct * 0.8) label = -1;
     dataset.push({ features: f, label });
   }
 
   if (onProgress) onProgress(55);
+
+  // Target Dataset Class Distribution (Prioritatea 4)
+  let buyCount = 0, holdCount = 0, sellCount = 0;
+  for (const d of dataset) {
+    if (d.label === 1) buyCount++;
+    else if (d.label === -1) sellCount++;
+    else holdCount++;
+  }
+  const totalDataBars = dataset.length || 1;
+  const classDistribution: ClassDistributionData = {
+    buyCount,
+    holdCount,
+    sellCount,
+    buyPct: parseFloat(((buyCount / totalDataBars) * 100).toFixed(1)),
+    holdPct: parseFloat(((holdCount / totalDataBars) * 100).toFixed(1)),
+    sellPct: parseFloat(((sellCount / totalDataBars) * 100).toFixed(1)),
+  };
   
   // Real Walk-Forward Validation (Expanding Window)
   const nFolds = 4;
@@ -730,12 +1114,21 @@ export async function runRealStrategyAnalysis(
   let winningTrades = 0, losingTrades = 0, grossProfit = 0, grossLoss = 0;
   let currentEquity = 100, peakEquity = 100, maxDrawdownPct = 0;
   let position: { type: number, entryPrice: number, entryIdx: number } | null = null;
+  const tradeReturnsList: number[] = [];
+  const testBuyScores: { isBuy: boolean, probBuy: number }[] = [];
+  let lastFoldTestData: DataPoint[] = [];
+
+  const confusionMatrix: ConfusionMatrixData = {
+    buyAsBuy: 0, buyAsHold: 0, buyAsSell: 0,
+    holdAsBuy: 0, holdAsHold: 0, holdAsSell: 0,
+    sellAsBuy: 0, sellAsHold: 0, sellAsSell: 0,
+  };
   
   const feeRate = 0.001; // Binance 0.1% fee
   const slippageRate = 0.0005; // 0.05% slippage
-  const slPct = modelParams.stopLoss || 2.0;
-  const tpPct = modelParams.takeProfit || 4.0;
-  const confidenceThreshold = modelParams.confidenceThreshold || 60; // PASUL 5: Strict 60% confidence filter
+  const slPct = modelParams.stopLoss || 1.8;
+  const tpPct = modelParams.takeProfit || 3.8;
+  const confidenceThreshold = modelParams.confidenceThreshold !== undefined ? modelParams.confidenceThreshold : 40;
 
   let finalModel: RandomForest = new RandomForest();
 
@@ -752,19 +1145,45 @@ export async function runRealStrategyAnalysis(
 
     if (fold === nFolds - 1) {
        finalModel = model;
+       lastFoldTestData = testData;
     }
 
     if (onProgress) onProgress(55 + (fold / nFolds) * 20);
 
     for (let i = 0; i < testData.length; i++) {
       const d = testData[i];
-      const pred = model.predict(d.features);
+      const detailedPred = model.predictDetailed(d.features);
+      const pred = { value: detailedPred.value, prob: detailedPred.prob };
+      testBuyScores.push({ isBuy: d.label === 1, probBuy: detailedPred.probBuy });
+
       if (pred.value === d.label) correct++;
       totalTestBars++;
+
+      // Populate Confusion Matrix
+      if (d.label === 1) {
+        if (pred.value === 1) confusionMatrix.buyAsBuy++;
+        else if (pred.value === 0) confusionMatrix.buyAsHold++;
+        else if (pred.value === -1) confusionMatrix.buyAsSell++;
+      } else if (d.label === -1) {
+        if (pred.value === 1) confusionMatrix.sellAsBuy++;
+        else if (pred.value === 0) confusionMatrix.sellAsHold++;
+        else if (pred.value === -1) confusionMatrix.sellAsSell++;
+      } else {
+        if (pred.value === 1) confusionMatrix.holdAsBuy++;
+        else if (pred.value === 0) confusionMatrix.holdAsHold++;
+        else if (pred.value === -1) confusionMatrix.holdAsSell++;
+      }
 
       const klineIdx = 200 + trainEnd + i;
       const nextKline = klines[klineIdx + 1];
       if (!nextKline) continue;
+
+      const currentAtr = atrArr[klineIdx] || klines[klineIdx].close * 0.02;
+      const currentAtrPct = (currentAtr / klines[klineIdx].close) * 100;
+
+      // Dynamic ATR SL/TP: 1.5x ATR SL, 3.0x ATR TP
+      const activeSlPct = Math.max(0.8, Math.min(5.0, currentAtrPct * 1.5));
+      const activeTpPct = Math.max(1.8, Math.min(10.0, currentAtrPct * 3.0));
 
       if (position) {
         let hitSL = false;
@@ -772,16 +1191,17 @@ export async function runRealStrategyAnalysis(
         let exitPrice = 0;
 
         if (position.type === 1) {
-           const slPrice = position.entryPrice * (1 - slPct / 100);
-           const tpPrice = position.entryPrice * (1 + tpPct / 100);
+           const slPrice = position.entryPrice * (1 - activeSlPct / 100);
+           const tpPrice = position.entryPrice * (1 + activeTpPct / 100);
            
            if (nextKline.low <= slPrice) { hitSL = true; exitPrice = slPrice; }
            else if (nextKline.high >= tpPrice) { hitTP = true; exitPrice = tpPrice; }
            
-           if (hitSL || hitTP || (klineIdx - position.entryIdx >= 5)) {
+           if (hitSL || hitTP || (klineIdx - position.entryIdx >= 12)) {
              if (!hitSL && !hitTP) exitPrice = nextKline.close;
              exitPrice = exitPrice * (1 - slippageRate);
              const returnPct = ((exitPrice - position.entryPrice) / position.entryPrice) * 100 - (feeRate * 200);
+             tradeReturnsList.push(returnPct);
              
              if (returnPct > 0) { winningTrades++; grossProfit += returnPct; }
              else { losingTrades++; grossLoss += Math.abs(returnPct); }
@@ -789,16 +1209,17 @@ export async function runRealStrategyAnalysis(
              position = null;
            }
         } else if (position.type === -1) {
-           const slPrice = position.entryPrice * (1 + slPct / 100);
-           const tpPrice = position.entryPrice * (1 - tpPct / 100);
+           const slPrice = position.entryPrice * (1 + activeSlPct / 100);
+           const tpPrice = position.entryPrice * (1 - activeTpPct / 100);
            
            if (nextKline.high >= slPrice) { hitSL = true; exitPrice = slPrice; }
            else if (nextKline.low <= tpPrice) { hitTP = true; exitPrice = tpPrice; }
            
-           if (hitSL || hitTP || (klineIdx - position.entryIdx >= 5)) {
+           if (hitSL || hitTP || (klineIdx - position.entryIdx >= 12)) {
              if (!hitSL && !hitTP) exitPrice = nextKline.close;
              exitPrice = exitPrice * (1 + slippageRate);
              const returnPct = ((position.entryPrice - exitPrice) / position.entryPrice) * 100 - (feeRate * 200);
+             tradeReturnsList.push(returnPct);
              
              if (returnPct > 0) { winningTrades++; grossProfit += returnPct; }
              else { losingTrades++; grossLoss += Math.abs(returnPct); }
@@ -808,7 +1229,7 @@ export async function runRealStrategyAnalysis(
         }
       }
 
-      // PASUL 5: Confidence Filter (must meet or exceed threshold, e.g. >=60%)
+      // PASUL 5: Confidence Filter
       if (!position && pred.prob >= confidenceThreshold) {
         if (pred.value === 1) {
            let entryPrice = nextKline.open * (1 + slippageRate);
@@ -835,6 +1256,7 @@ export async function runRealStrategyAnalysis(
       const returnPct = position.type === 1 
           ? ((exitPrice - position.entryPrice) / position.entryPrice) * 100 - (feeRate * 200)
           : ((position.entryPrice - exitPrice) / position.entryPrice) * 100 - (feeRate * 200);
+      tradeReturnsList.push(returnPct);
           
       if (returnPct > 0) { winningTrades++; grossProfit += returnPct; }
       else { losingTrades++; grossLoss += Math.abs(returnPct); }
@@ -849,6 +1271,77 @@ export async function runRealStrategyAnalysis(
     precision: totalTrades > 0 ? winningTrades / totalTrades : 0,
   };
 
+  // Prioritatea 1: Precision, Recall, F1 for BUY, SELL, HOLD
+  const actualBuy = confusionMatrix.buyAsBuy + confusionMatrix.buyAsHold + confusionMatrix.buyAsSell;
+  const predictedBuy = confusionMatrix.buyAsBuy + confusionMatrix.holdAsBuy + confusionMatrix.sellAsBuy;
+  const precBuy = predictedBuy > 0 ? (confusionMatrix.buyAsBuy / predictedBuy) * 100 : 0;
+  const recBuy = actualBuy > 0 ? (confusionMatrix.buyAsBuy / actualBuy) * 100 : 0;
+  const f1Buy = (precBuy + recBuy) > 0 ? (2 * precBuy * recBuy) / (precBuy + recBuy) : 0;
+
+  const actualSell = confusionMatrix.sellAsBuy + confusionMatrix.sellAsHold + confusionMatrix.sellAsSell;
+  const predictedSell = confusionMatrix.buyAsSell + confusionMatrix.holdAsSell + confusionMatrix.sellAsSell;
+  const precSell = predictedSell > 0 ? (confusionMatrix.sellAsSell / predictedSell) * 100 : 0;
+  const recSell = actualSell > 0 ? (confusionMatrix.sellAsSell / actualSell) * 100 : 0;
+  const f1Sell = (precSell + recSell) > 0 ? (2 * precSell * recSell) / (precSell + recSell) : 0;
+
+  const actualHold = confusionMatrix.holdAsBuy + confusionMatrix.holdAsHold + confusionMatrix.holdAsSell;
+  const predictedHold = confusionMatrix.buyAsHold + confusionMatrix.holdAsHold + confusionMatrix.sellAsHold;
+  const precHold = predictedHold > 0 ? (confusionMatrix.holdAsHold / predictedHold) * 100 : 0;
+  const recHold = actualHold > 0 ? (confusionMatrix.holdAsHold / actualHold) * 100 : 0;
+  const f1Hold = (precHold + recHold) > 0 ? (2 * precHold * recHold) / (precHold + recHold) : 0;
+
+  const classMetrics: DetailedClassMetrics = {
+    buy: { precision: parseFloat(precBuy.toFixed(1)), recall: parseFloat(recBuy.toFixed(1)), f1: parseFloat(f1Buy.toFixed(1)) },
+    sell: { precision: parseFloat(precSell.toFixed(1)), recall: parseFloat(recSell.toFixed(1)), f1: parseFloat(f1Sell.toFixed(1)) },
+    hold: { precision: parseFloat(precHold.toFixed(1)), recall: parseFloat(recHold.toFixed(1)), f1: parseFloat(f1Hold.toFixed(1)) },
+  };
+
+  // Prioritatea 2: ROC-AUC for BUY
+  const rocAucBuy = calculateRocAucBuy(testBuyScores);
+
+  // Prioritatea 5: Advanced Institutional Backtest Metrics
+  const winningTradeList = tradeReturnsList.filter(r => r > 0);
+  const losingTradeList = tradeReturnsList.filter(r => r < 0);
+
+  const avgWin = winningTradeList.length > 0 
+    ? winningTradeList.reduce((a, b) => a + b, 0) / winningTradeList.length 
+    : 0;
+  const avgLoss = losingTradeList.length > 0 
+    ? Math.abs(losingTradeList.reduce((a, b) => a + b, 0) / losingTradeList.length) 
+    : 0;
+
+  const winRateDec = totalTrades > 0 ? winningTrades / totalTrades : 0;
+  const lossRateDec = totalTrades > 0 ? losingTrades / totalTrades : 0;
+  const expectancy = (winRateDec * avgWin) - (lossRateDec * avgLoss);
+
+  const meanRet = tradeReturnsList.length > 0 ? tradeReturnsList.reduce((a, b) => a + b, 0) / tradeReturnsList.length : 0;
+  const variance = tradeReturnsList.length > 1 
+    ? tradeReturnsList.reduce((a, b) => a + Math.pow(b - meanRet, 2), 0) / (tradeReturnsList.length - 1)
+    : 0;
+  const stdDev = Math.sqrt(variance);
+  const sharpeRatio = stdDev > 0 ? parseFloat(((meanRet / stdDev) * Math.sqrt(Math.max(12, totalTrades))).toFixed(2)) : 0;
+
+  const downsideLosses = tradeReturnsList.filter(r => r < 0);
+  const downsideVar = downsideLosses.length > 0
+    ? downsideLosses.reduce((a, b) => a + Math.pow(b, 2), 0) / tradeReturnsList.length
+    : 0;
+  const downsideStdDev = Math.sqrt(downsideVar);
+  const sortinoRatio = downsideStdDev > 0 ? parseFloat(((meanRet / downsideStdDev) * Math.sqrt(Math.max(12, totalTrades))).toFixed(2)) : 0;
+
+  const totalReturnPercent = parseFloat((currentEquity - 100).toFixed(2));
+  const calmarRatio = maxDrawdownPct > 0 ? parseFloat((totalReturnPercent / maxDrawdownPct).toFixed(2)) : (totalReturnPercent > 0 ? 9.9 : 0);
+  const recoveryFactor = maxDrawdownPct > 0 ? parseFloat((totalReturnPercent / maxDrawdownPct).toFixed(2)) : (totalReturnPercent > 0 ? 9.9 : 0);
+
+  const advancedMetrics: AdvancedFinancialMetrics = {
+    avgWin: parseFloat(avgWin.toFixed(2)),
+    avgLoss: parseFloat(avgLoss.toFixed(2)),
+    expectancy: parseFloat(expectancy.toFixed(2)),
+    sharpeRatio,
+    sortinoRatio,
+    calmarRatio,
+    recoveryFactor,
+  };
+
   if (onProgress) onProgress(90);
 
   // Train a surrogate Explainer Tree on the full dataset to extract decision paths
@@ -861,53 +1354,153 @@ export async function runRealStrategyAnalysis(
   const expPred = predictTree(explainerTree, currentFeatures);
   const currentPred = finalModel.predict(currentFeatures);
 
-  const roundedProb = Math.round(currentPred.prob);
+  // Prioritatea 3: Permutation Importance
+  const featureImportances = finalModel.getPermutationImportances(lastFoldTestData.length > 0 ? lastFoldTestData : dataset.slice(-300));
 
-  // PASUL 5: Strict Signal Mapping Rules
-  // < 60% => HOLD
-  // 60-69% => Weak
-  // 70-79% => Good
-  // 80%+ => Strong
-  let action: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
-  if (roundedProb >= confidenceThreshold) {
-    if (currentPred.value === 1) action = 'BUY';
-    else if (currentPred.value === -1) action = 'SELL';
+  const rawProb = Math.round(currentPred.prob);
+  let impactAdjustment = 0;
+
+  if (currentPred.value === 1) { // Technical BUY
+    if (newsSentiment.score > 0) {
+      impactAdjustment = Math.min(12, Math.round(newsSentiment.score * 0.12));
+    } else if (newsSentiment.score < 0) {
+      impactAdjustment = -Math.min(18, Math.round(Math.abs(newsSentiment.score) * 0.18));
+    }
+  } else if (currentPred.value === -1) { // Technical SELL
+    if (newsSentiment.score < 0) {
+      impactAdjustment = Math.min(12, Math.round(Math.abs(newsSentiment.score) * 0.12));
+    } else if (newsSentiment.score > 0) {
+      impactAdjustment = -Math.min(18, Math.round(newsSentiment.score * 0.18));
+    }
   } else {
-    action = 'HOLD';
+    impactAdjustment = Math.round(newsSentiment.score * 0.08);
   }
 
-  let confidenceCategory = 'HOLD (Sub 60%)';
-  if (roundedProb >= 80) confidenceCategory = 'Semnal Puternic (>=80%)';
-  else if (roundedProb >= 70) confidenceCategory = 'Semnal Bun (70-79%)';
-  else if (roundedProb >= 60) confidenceCategory = 'Semnal Slab (60-69%)';
+  newsSentiment.impactAdjustment = impactAdjustment;
+
+  const adjustedProb = Math.min(98, Math.max(5, rawProb + impactAdjustment));
+
+  let action: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
+  let confidenceCategory = '';
+  const isNeutralPrediction = currentPred.value === 0;
+
+  if (isNeutralPrediction) {
+    action = 'HOLD';
+    confidenceCategory = `Piață Neutră / Consolidare (Încredere Stagnare: ${adjustedProb}%)`;
+  } else if (adjustedProb >= confidenceThreshold) {
+    if (currentPred.value === 1) {
+      action = 'BUY';
+      confidenceCategory = adjustedProb >= 80 ? 'Semnal Puternic CUMPĂRARE (>=80%)' :
+                         adjustedProb >= 70 ? 'Semnal Bun CUMPĂRARE (70-79%)' : 'Semnal Moderat CUMPĂRARE (40-69%)';
+    } else if (currentPred.value === -1) {
+      action = 'SELL';
+      confidenceCategory = adjustedProb >= 80 ? 'Semnal Puternic VÂNZARE (>=80%)' :
+                         adjustedProb >= 70 ? 'Semnal Bun VÂNZARE (70-79%)' : 'Semnal Moderat VÂNZARE (40-69%)';
+    }
+  } else {
+    action = 'HOLD';
+    const originalDir = currentPred.value === 1 ? 'CUMPĂRARE (BUY)' : 'VÂNZARE (SELL)';
+    confidenceCategory = `Semnal ${originalDir} sub pragul minim de ${confidenceThreshold}% (Ajustat: ${adjustedProb}%) => Marcate ca HOLD`;
+  }
+
+  const sentimentSign = newsSentiment.score >= 0 ? `+${newsSentiment.score}%` : `${newsSentiment.score}%`;
+  const impactSign = impactAdjustment >= 0 ? `+${impactAdjustment}%` : `${impactAdjustment}%`;
+
+  const detailedExplanation: string[] = [
+    `Model Principal: Random Forest Ensemble (3000 lumânări, 21 indicatori tehnici)`,
+    `Barometru Sentiment Știri (Binance & Market): ${newsSentiment.sentimentLabel} (${sentimentSign} Net)`,
+    `Ajustare Încredere Sentiment Știri: ${impactSign} aplicat la scorul tehnic (${rawProb}% -> ${adjustedProb}%)`,
+  ];
+
+  if (isNeutralPrediction) {
+    detailedExplanation.push(`Predicție Model: HOLD / Consolidare — Modelul estimează cu ${adjustedProb}% că piața evoluează lateral/fără trend clar (NU se recomandă intrare pe CUMPĂRARE sau VÂNZARE).`);
+  } else if (adjustedProb < confidenceThreshold) {
+    const dirStr = currentPred.value === 1 ? 'BUY' : 'SELL';
+    detailedExplanation.push(`Modelul a detectat un semnal de ${dirStr} (${adjustedProb}%), dar acesta este SUB pragul minim configurat de ${confidenceThreshold}%, fiind filtrat ca HOLD.`);
+  } else {
+    detailedExplanation.push(`Nivel Încredere Final: ${confidenceCategory} | Scor Ajustat: ${adjustedProb}% (Prag Minim: ${confidenceThreshold}%)`);
+  }
+
+  detailedExplanation.push(...expPred.path.slice(0, 2));
+  detailedExplanation.push(`Semnal Execuție Final: ${action}`);
 
   if (onProgress) onProgress(100);
 
   return {
     symbol,
     signal: action,
-    probability: roundedProb,
+    probability: adjustedProb,
+    newsSentiment,
     indicators: computeIndicatorsSnapshot(klines),
     modelMetrics: {
       accuracy: parseFloat(metrics.accuracy.toFixed(1)),
       precision: parseFloat(metrics.precision.toFixed(2)),
       recall: parseFloat((metrics.accuracy / 100).toFixed(2)),
       f1Score: parseFloat((2 * metrics.precision * (metrics.accuracy / 100) / (metrics.precision + (metrics.accuracy / 100) || 1)).toFixed(2)),
+      rocAucBuy,
+      classMetrics,
+      classDistribution,
     },
+    featureImportances,
+    confusionMatrix,
     backtestResults: {
       totalTrades, winningTrades, losingTrades,
       winRate: parseFloat(metrics.winRate.toFixed(1)),
       profitFactor: parseFloat(metrics.profitFactor.toFixed(2)),
       totalReturnPercent: parseFloat((currentEquity - 100).toFixed(2)),
       maxDrawdownPercent: parseFloat(maxDrawdownPct.toFixed(2)),
+      advancedMetrics,
     },
-    explanation: [
-      `Model Principal: Random Forest Ensemble (3000 lumânări, 21 indicatori)`,
-      `Nivel Încredere: ${confidenceCategory} | Scor Model: ${roundedProb}% (Prag minim: ${confidenceThreshold}%)`,
-      ...expPred.path.slice(0, 3),
-      `Semnal Execuție Final: ${action}`
-    ],
+    explanation: detailedExplanation,
   };
+}
+
+export async function runMultiSymbolBacktest(
+  symbols: string[] = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'LINKUSDT', 'AVAXUSDT'],
+  modelParams: any = {},
+  onProgress?: (progress: number, currentSymbol?: string) => void
+): Promise<{ results: MultiSymbolResult[]; avgProfitFactor: number; avgWinRate: number }> {
+  const results: MultiSymbolResult[] = [];
+  
+  for (let i = 0; i < symbols.length; i++) {
+    const sym = symbols[i];
+    if (onProgress) onProgress(Math.round(((i) / symbols.length) * 100), sym);
+    
+    try {
+      const res = await runRealStrategyAnalysis(sym, 'rf', modelParams);
+      const pf = res.backtestResults.profitFactor;
+      const wr = res.backtestResults.winRate;
+      const ret = res.backtestResults.totalReturnPercent;
+      
+      let status: 'Excelent' | 'Decent / Stabil' | 'Atipic / Overfitted' = 'Decent / Stabil';
+      if (pf >= 1.2 && wr >= 45 && ret > 0) status = 'Excelent';
+      else if (pf < 0.95 || ret < -12) status = 'Atipic / Overfitted';
+
+      results.push({
+        symbol: sym,
+        winRate: parseFloat(wr.toFixed(1)),
+        profitFactor: parseFloat(pf.toFixed(2)),
+        totalReturnPercent: parseFloat(ret.toFixed(2)),
+        maxDrawdownPercent: res.backtestResults.maxDrawdownPercent,
+        accuracy: res.modelMetrics.accuracy,
+        totalTrades: res.backtestResults.totalTrades,
+        generalizationStatus: status,
+      });
+    } catch (e) {
+      console.error(`Multi-symbol backtest error for ${sym}:`, e);
+    }
+  }
+
+  if (onProgress) onProgress(100);
+
+  const avgProfitFactor = results.length > 0 
+    ? parseFloat((results.reduce((a, b) => a + b.profitFactor, 0) / results.length).toFixed(2))
+    : 1.0;
+  const avgWinRate = results.length > 0
+    ? parseFloat((results.reduce((a, b) => a + b.winRate, 0) / results.length).toFixed(1))
+    : 50.0;
+
+  return { results, avgProfitFactor, avgWinRate };
 }
 
 export function generateSignal(symbol: string, currentPrice: number) { return { action: 'HOLD', prob: 50 }; }

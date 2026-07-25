@@ -6,6 +6,32 @@ const BASELINE_PRICES: Record<string, number> = {
   'ETHUSDT': 3450.00,
   'SOL': 145.20,
   'SOLUSDT': 145.20,
+  'BNB': 565.00,
+  'BNBUSDT': 565.00,
+  'XRP': 0.58,
+  'XRPUSDT': 0.58,
+  'ADA': 0.164,
+  'ADAUSDT': 0.164,
+  'LINK': 8.30,
+  'LINKUSDT': 8.30,
+  'AVAX': 6.30,
+  'AVAXUSDT': 6.30,
+  'DOGE': 0.069,
+  'DOGEUSDT': 0.069,
+  'SUI': 0.71,
+  'SUIUSDT': 0.71,
+  'NEAR': 1.80,
+  'NEARUSDT': 1.80,
+  'ATOM': 1.38,
+  'ATOMUSDT': 1.38,
+  'DEXE': 3.50,
+  'DEXEUSDT': 3.50,
+  'ACE': 0.092,
+  'ACEUSDT': 0.092,
+  'ZAMA': 0.053,
+  'ZAMAUSDT': 0.053,
+  'PEPE': 0.000009,
+  'PEPEUSDT': 0.000009,
   'NVDA': 125.80,
   'AAPL': 224.50,
   'MSFT': 412.30,
@@ -23,21 +49,27 @@ function getFallbackBasePrice(symbol: string): number {
     return BASELINE_PRICES[cleanSymbol];
   }
   
+  if (cleanSymbol.endsWith('USDT')) {
+    const baseAsset = cleanSymbol.replace('USDT', '');
+    if (BASELINE_PRICES[baseAsset] !== undefined) {
+      return BASELINE_PRICES[baseAsset];
+    }
+  }
+
   // Deterministic fallback based on symbol characters
   let hash = 0;
   for (let i = 0; i < cleanSymbol.length; i++) {
     hash = cleanSymbol.charCodeAt(i) + ((hash << 5) - hash);
   }
   const absoluteHash = Math.abs(hash);
-  // Return a price between $10 and $1000
-  return 10 + (absoluteHash % 990);
+  return parseFloat((0.10 + (absoluteHash % 1000) / 100).toFixed(4));
 }
 
 export async function fetchLivePrice(symbol: string): Promise<number | null> {
   const cleanSymbol = symbol.trim().toUpperCase();
   
   try {
-    // Attempt Binance API (works for crypto trading pairs like BTCUSDT, ETHUSDT)
+    // Attempt Binance API
     const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${cleanSymbol}`);
     if (res.ok) {
       const data = await res.json();
@@ -47,17 +79,18 @@ export async function fetchLivePrice(symbol: string): Promise<number | null> {
       }
     }
   } catch (error) {
-    // Fail silently, fallback below will handle it
-    console.debug(`Binance API lookup failed for ${cleanSymbol}, using robust local simulator:`, error);
+    console.debug(`Binance API lookup failed for ${cleanSymbol}:`, error);
   }
 
-  // Fallback to highly realistic local simulator data for traditional stocks (NVDA, MSFT etc) or if API is offline
+  // If crypto trading pair, do not generate fictive fallback prices
+  if (cleanSymbol.endsWith('USDT') || ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'SUI', 'NEAR', 'ATOM', 'DEXE', 'ACE', 'ZAMA', 'DOGE', 'AVAX', 'PEPE'].includes(cleanSymbol)) {
+    return null;
+  }
+
+  // Fallback for traditional stocks (NVDA, MSFT etc)
   const basePrice = getFallbackBasePrice(cleanSymbol);
-  // Add a minor random fluctuation (+- 0.35%) to simulate active ticking markets
   const fluctuation = 1 + (Math.random() * 0.007 - 0.0035);
-  const finalPrice = parseFloat((basePrice * fluctuation).toFixed(2));
-  
-  return finalPrice;
+  return parseFloat((basePrice * fluctuation).toFixed(2));
 }
 
 export async function fetchChartData(symbol: string): Promise<{ time: string, value: number }[]> {

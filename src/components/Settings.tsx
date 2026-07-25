@@ -27,7 +27,10 @@ export function Settings() {
     telegramChatId,
     setTelegramChatId,
     binanceMode,
-    setBinanceMode
+    setBinanceMode,
+    maxLogs,
+    setMaxLogs,
+    clearLogs
   } = useTradingStore();
 
   const handleEnablePush = async () => {
@@ -254,17 +257,71 @@ export function Settings() {
         </div>
 
         <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-6">
+          <h3 className="text-lg font-serif text-zinc-200 mb-2">Capacitate Stocare Loguri (Server / VPS)</h3>
+          <p className="text-sm text-zinc-400 mb-4">Setează numărul maxim de loguri păstrate în memorie și pe server. Ideal pentru găzduire continuă pe un VPS.</p>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-2 font-sans">Număr Maxim Loguri Salvate</label>
+              <div className="flex items-center gap-2 flex-wrap">
+                {[100, 250, 500, 1000, 2500, 5000, 10000].map(limit => (
+                  <button
+                    key={limit}
+                    onClick={() => setMaxLogs(limit)}
+                    className={`px-3.5 py-2 font-medium rounded-lg text-xs transition-colors border ${
+                      (maxLogs || 1000) === limit
+                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-bold'
+                        : 'bg-zinc-800/40 text-zinc-300 border-white/5 hover:bg-zinc-800'
+                    }`}
+                  >
+                    {limit >= 1000 ? `${limit / 1000}k` : limit} {limit === 1000 ? '(Recomandat)' : limit >= 2500 ? '(VPS)' : ''}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="pt-2 flex items-center justify-between border-t border-white/5">
+              <span className="text-xs text-zinc-500">Capacitate curentă selectată: <strong className="text-emerald-400">{maxLogs || 1000} loguri</strong></span>
+              <button
+                onClick={() => {
+                  if (window.confirm('Ștergi toate logurile din memorie?')) clearLogs();
+                }}
+                className="text-xs text-rose-400 hover:text-rose-300 transition-colors"
+              >
+                Șterge toate logurile
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-6">
           <h3 className="text-lg font-serif text-zinc-200 mb-4">Paper Trading Setup</h3>
           <p className="text-sm text-zinc-400 mb-4">Sistemul rulează 100% offline pentru execuție (fără API-uri de brokeri reali). Setările de mai jos definesc capitalul tău virtual de test.</p>
           <div className="space-y-4">
-            <div className="flex items-center gap-4 flex-wrap">
-              <button 
-                onClick={() => setBalance(10000)}
-                className="px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 font-medium rounded-md transition-colors text-sm border border-rose-500/20">
-                Resetare Portofoliu (la $10,000)
-              </button>
-              <span className="text-xs text-zinc-500">Toate pozițiile curente vor fi închise și istoricul logurilor va fi șters.</span>
+            <div className="flex items-center gap-3 flex-wrap">
+              {[100, 500, 1000, 10000].map(amt => (
+                <button 
+                  key={amt}
+                  onClick={async () => {
+                    setBalance(amt);
+                    try {
+                      await fetch('/api/bot/reset', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ balance: amt })
+                      });
+                    } catch (e) {
+                      console.error('Reset error:', e);
+                    }
+                  }}
+                  className={`px-4 py-2 font-medium rounded-md transition-colors text-sm border ${
+                    amt === 100
+                    ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/20'
+                    : 'bg-zinc-800/40 hover:bg-zinc-800 text-zinc-300 border-white/5'
+                  }`}>
+                  Resetare la ${amt} {amt === 100 ? '(Recomandat)' : ''}
+                </button>
+              ))}
             </div>
+            <p className="text-xs text-zinc-500">Toate pozițiile curente vor fi închise și soldul va fi reinițializat.</p>
           </div>
         </div>
 

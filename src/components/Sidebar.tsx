@@ -23,6 +23,7 @@ export function Sidebar({ currentView, onViewChange, isOpenMobile, onCloseMobile
     { id: 'strategies', label: 'ML Strategies' },
     { id: 'backtesting', label: 'Backtesting' },
     { id: 'analyst', label: 'AI Analyst' },
+    { id: 'news', label: 'Flux Știri Binance' },
     { id: 'alerts', label: 'Alerts' },
     { id: 'logs', label: 'Trade Logs' },
     { id: 'settings', label: 'Settings' },

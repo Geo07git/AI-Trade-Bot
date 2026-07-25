@@ -69,6 +69,7 @@ export interface BotState {
   timezone: string;
   dataInterval: number; // in seconds
   analysisInterval: number; // in seconds
+  maxLogs: number;
   apiKey: string;
   apiSecret: string;
   binanceMode: 'testnet' | 'live' | 'paper';
@@ -84,6 +85,32 @@ const BASELINE_PRICES: Record<string, number> = {
   'ETHUSDT': 3450.00,
   'SOL': 145.20,
   'SOLUSDT': 145.20,
+  'BNB': 565.00,
+  'BNBUSDT': 565.00,
+  'XRP': 0.58,
+  'XRPUSDT': 0.58,
+  'ADA': 0.164,
+  'ADAUSDT': 0.164,
+  'LINK': 8.30,
+  'LINKUSDT': 8.30,
+  'AVAX': 6.30,
+  'AVAXUSDT': 6.30,
+  'DOGE': 0.069,
+  'DOGEUSDT': 0.069,
+  'SUI': 0.71,
+  'SUIUSDT': 0.71,
+  'NEAR': 1.80,
+  'NEARUSDT': 1.80,
+  'ATOM': 1.38,
+  'ATOMUSDT': 1.38,
+  'DEXE': 3.50,
+  'DEXEUSDT': 3.50,
+  'ACE': 0.092,
+  'ACEUSDT': 0.092,
+  'ZAMA': 0.053,
+  'ZAMAUSDT': 0.053,
+  'PEPE': 0.000009,
+  'PEPEUSDT': 0.000009,
   'NVDA': 125.80,
   'AAPL': 224.50,
   'MSFT': 412.30,
@@ -99,14 +126,25 @@ function getFallbackBasePrice(symbol: string): number {
   if (BASELINE_PRICES[cleanSymbol] !== undefined) {
     return BASELINE_PRICES[cleanSymbol];
   }
+
+  // Check base asset if ending with USDT
+  if (cleanSymbol.endsWith('USDT')) {
+    const baseAsset = cleanSymbol.replace('USDT', '');
+    if (BASELINE_PRICES[baseAsset] !== undefined) {
+      return BASELINE_PRICES[baseAsset];
+    }
+  }
+
   let hash = 0;
   for (let i = 0; i < cleanSymbol.length; i++) {
     hash = cleanSymbol.charCodeAt(i) + ((hash << 5) - hash);
   }
-  return 10 + (Math.abs(hash) % 990);
+  const absoluteHash = Math.abs(hash);
+  // Return a realistic crypto price between $0.10 and $10.00 for unknown tokens
+  return parseFloat((0.10 + (absoluteHash % 1000) / 100).toFixed(4));
 }
 
-async function fetchLivePriceServer(symbol: string): Promise<number> {
+async function fetchLivePriceServer(symbol: string): Promise<number | null> {
   const cleanSymbol = symbol.trim().toUpperCase();
   try {
     const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${cleanSymbol}`);
@@ -118,12 +156,11 @@ async function fetchLivePriceServer(symbol: string): Promise<number> {
       }
     }
   } catch (err) {
-    // Fallback below
+    // API network or timeout error
   }
 
-  const basePrice = getFallbackBasePrice(cleanSymbol);
-  const fluctuation = 1 + (Math.random() * 0.008 - 0.004);
-  return parseFloat((basePrice * fluctuation).toFixed(2));
+  // Strictly return null when market price is unavailable. Never generate fictive or random fallback prices.
+  return null;
 }
 
 async function generateSignalServer(symbol: string, currentPrice: number) {
@@ -134,6 +171,8 @@ async function generateSignalServer(symbol: string, currentPrice: number) {
       const data = await res.json();
       if (Array.isArray(data) && data.length >= 30) {
         const closes = data.map((d: any) => parseFloat(d[4]));
+        
+        // Calculate RSI (14)
         let gains = 0, losses = 0;
         for (let i = 1; i <= 14; i++) {
           const diff = closes[i] - closes[i - 1];
@@ -152,25 +191,42 @@ async function generateSignalServer(symbol: string, currentPrice: number) {
         const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
         const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + rs));
 
-        const firstClose = closes[0];
-        const lastClose = closes[closes.length - 1];
-        const momentum = ((lastClose - firstClose) / firstClose) * 100;
+        // Short term momentum (10 candles)
+        const recentClose = closes[closes.length - 1];
+        const prev10Close = closes[Math.max(0, closes.length - 10)];
+        const momentum10 = ((recentClose - prev10Close) / prev10Close) * 100;
+
+        // Simple EMA 20 & EMA 50
+        const calcEma = (period: number) => {
+          const k = 2 / (period + 1);
+          let ema = closes[0];
+          for (let i = 1; i < closes.length; i++) {
+            ema = closes[i] * k + ema * (1 - k);
+          }
+          return ema;
+        };
+        const ema20 = calcEma(20);
+        const ema50 = calcEma(50);
+        const emaBullish = recentClose > ema20 && ema20 >= ema50;
+        const emaBearish = recentClose < ema20 && ema20 <= ema50;
 
         let action: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
-        let prob = 50;
+        let prob = 52;
 
-        if (rsi < 35 || (rsi < 48 && momentum > 1.2)) {
-          prob = Math.min(95, Math.round(62 + (35 - Math.min(35, rsi)) * 0.8 + momentum * 2));
-          action = prob >= 60 ? 'BUY' : 'HOLD';
-        } else if (rsi > 65 || (rsi > 52 && momentum < -1.2)) {
-          prob = Math.min(95, Math.round(62 + (rsi - 65) * 0.8 - momentum * 2));
-          action = prob >= 60 ? 'SELL' : 'HOLD';
+        if (rsi < 42 || (rsi < 55 && (momentum10 > 0.8 || emaBullish))) {
+          const base = 60 + (42 - Math.min(42, rsi)) * 0.8 + Math.max(0, momentum10) * 3 + (emaBullish ? 8 : 0);
+          prob = Math.min(95, Math.max(62, Math.round(base)));
+          action = 'BUY';
+        } else if (rsi > 58 || (rsi > 45 && (momentum10 < -0.8 || emaBearish))) {
+          const base = 60 + (Math.max(58, rsi) - 58) * 0.8 + Math.max(0, -momentum10) * 3 + (emaBearish ? 8 : 0);
+          prob = Math.min(95, Math.max(62, Math.round(base)));
+          action = 'SELL';
         } else {
           action = 'HOLD';
           prob = 52;
         }
 
-        return { action, prob: Math.max(50, prob) };
+        return { action, prob };
       }
     }
   } catch (err) {
@@ -178,7 +234,7 @@ async function generateSignalServer(symbol: string, currentPrice: number) {
   }
 
   const hash = symbol.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const rawProb = 45 + (hash % 20);
+  const rawProb = 48 + (hash % 25);
   let action: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
   let prob = rawProb;
   if (rawProb >= 60) { action = 'BUY'; prob = rawProb; }
@@ -217,8 +273,8 @@ class ServerBotEngine {
   constructor() {
     this.state = {
       autoTradingActive: true,
-      balance: 10000,
-      initialBalance: 10000,
+      balance: 100,
+      initialBalance: 100,
       watchlist: [
         { symbol: 'BTCUSDT', price: null, signal: null, active: true },
         { symbol: 'ETHUSDT', price: null, signal: null, active: true },
@@ -255,6 +311,7 @@ class ServerBotEngine {
       timezone: 'Europe/Bucharest',
       dataInterval: 10,
       analysisInterval: 30,
+      maxLogs: 1000,
       serverStartedAt: new Date().toISOString(),
       apiKey: '',
       apiSecret: '',
@@ -274,6 +331,13 @@ class ServerBotEngine {
         const parsed = JSON.parse(raw);
         const defaultWatchlist = this.state.watchlist;
         this.state = { ...this.state, ...parsed };
+        
+        // Auto-adjust legacy $10,000 portfolio to $100 if initial balance was default
+        if (this.state.initialBalance === 10000 || this.state.balance === 10000) {
+          this.state.balance = 100;
+          this.state.initialBalance = 100;
+          this.state.positions = [];
+        }
         
         // Merge missing symbols from default watchlist
         for (const defaultItem of defaultWatchlist) {
@@ -305,7 +369,14 @@ class ServerBotEngine {
       hour12: true
     });
     const time = timeFormatter.format(new Date());
-    this.state.logs = [{ time, message, type, equity }, ...this.state.logs.slice(0, 99)];
+    const limit = this.state.maxLogs || 1000;
+    this.state.logs = [{ time, message, type, equity }, ...this.state.logs.slice(0, limit - 1)];
+    this.savePersistedState();
+  }
+
+  public clearLogs() {
+    this.state.logs = [];
+    this.addLog('Logurile au fost șterse de utilizator.', 'info');
     this.savePersistedState();
   }
 
@@ -318,13 +389,19 @@ class ServerBotEngine {
     if (newConfig.timezone !== undefined) this.state.timezone = newConfig.timezone;
     if (newConfig.dataInterval !== undefined) this.state.dataInterval = newConfig.dataInterval;
     if (newConfig.analysisInterval !== undefined) this.state.analysisInterval = newConfig.analysisInterval;
+    if (newConfig.maxLogs !== undefined) {
+      this.state.maxLogs = newConfig.maxLogs;
+      if (this.state.logs.length > newConfig.maxLogs) {
+        this.state.logs = this.state.logs.slice(0, newConfig.maxLogs);
+      }
+    }
     if (newConfig.watchlist !== undefined) this.state.watchlist = newConfig.watchlist;
     if (newConfig.balance !== undefined) this.state.balance = newConfig.balance;
     if (newConfig.reportConfig !== undefined) this.state.reportConfig = { ...this.state.reportConfig, ...newConfig.reportConfig };
     this.savePersistedState();
   }
 
-  public resetPortfolio(newBalance = 10000) {
+  public resetPortfolio(newBalance = 100) {
     this.state.balance = newBalance;
     this.state.initialBalance = newBalance;
     this.state.positions = [];
@@ -423,6 +500,25 @@ class ServerBotEngine {
   }
 
   public async executeTrade(symbol: string, action: 'BUY' | 'SELL', price: number, amount: number) {
+    if (!price || price <= 0 || isNaN(price) || !amount || amount <= 0 || isNaN(amount)) {
+      console.warn(`[SAFETY] Trade anulat pentru ${symbol}: Preț sau cantitate invalidă (preț: ${price}, cantitate: ${amount})`);
+      return;
+    }
+
+    // Consistency sanity check: price anomaly check (> 20% jump)
+    const item = this.state.watchlist.find(w => w.symbol === symbol);
+    const pos = this.state.positions.find(p => p.symbol === symbol);
+    const lastPrice = item?.price || pos?.currentPrice || pos?.entryPrice;
+
+    if (lastPrice && lastPrice > 0) {
+      const diff = Math.abs(price - lastPrice) / lastPrice;
+      if (diff > 0.20) {
+        this.addLog(`[SAFETY] Preț anormal ignorat pentru ${symbol}: $${lastPrice} -> $${price} (variație ${(diff * 100).toFixed(1)}%). Ordin anulat.`, 'warning');
+        console.warn(`Preț anormal pentru ${symbol}: ${lastPrice} -> ${price}`);
+        return;
+      }
+    }
+
     let orderSuccess = true;
     
     if (this.state.binanceMode === 'testnet' || this.state.binanceMode === 'live') {
@@ -660,11 +756,29 @@ class ServerBotEngine {
     for (const item of this.state.watchlist) {
       if (!item.active) continue;
       
+      const pos = this.state.positions.find(p => p.symbol === item.symbol);
+      const lastPrice = item.price || pos?.currentPrice || pos?.entryPrice || 0;
+
       const livePrice = await fetchLivePriceServer(item.symbol);
+      
+      if (!livePrice || livePrice <= 0) {
+        console.warn(`[Binance] Preț indisponibil pentru ${item.symbol}. Scanare omisă.`);
+        continue;
+      }
+
+      // Check price jump consistency (diff > 20%)
+      if (lastPrice > 0) {
+        const diff = Math.abs(livePrice - lastPrice) / lastPrice;
+        if (diff > 0.20) {
+          this.addLog(`[SAFETY] Preț anormal ignorat pentru ${item.symbol}: $${lastPrice} -> $${livePrice} (${(diff * 100).toFixed(1)}% variație)`, 'warning');
+          console.warn(`Preț anormal pentru ${item.symbol}: ${lastPrice} -> ${livePrice}`);
+          continue;
+        }
+      }
+
       item.price = livePrice;
 
       // Update position current price if held
-      const pos = this.state.positions.find(p => p.symbol === item.symbol);
       if (pos) {
         pos.currentPrice = livePrice;
         const pnlPercent = ((livePrice - pos.entryPrice) / pos.entryPrice) * 100;
@@ -687,7 +801,7 @@ class ServerBotEngine {
 
   private async runMLAnalysis() {
     for (const item of this.state.watchlist) {
-      if (!item.active || !item.price) continue;
+      if (!item.active || !item.price || item.price <= 0) continue;
 
       const signal = await generateSignalServer(item.symbol, item.price);
       item.signal = signal;
@@ -696,9 +810,14 @@ class ServerBotEngine {
       const isHolding = pos && pos.amount > 0;
 
       if (signal.action === 'BUY' && signal.prob >= 60 && !isHolding) {
-        const amountToBuy = parseFloat((1000 / item.price).toFixed(6));
-        this.addLog(`[Signal Server ML] ${item.symbol}: BUY (${signal.prob}% prob). Executăm cumpărare automat.`, 'info');
-        await this.executeTrade(item.symbol, 'BUY', item.price, amountToBuy);
+        const allocation = Math.min(1000, Math.max(0, this.state.balance));
+        if (allocation >= 10) {
+          const amountToBuy = parseFloat((allocation / item.price).toFixed(6));
+          if (amountToBuy > 0) {
+            this.addLog(`[Signal Server ML] ${item.symbol}: BUY (${signal.prob}% prob). Executăm cumpărare automat.`, 'info');
+            await this.executeTrade(item.symbol, 'BUY', item.price, amountToBuy);
+          }
+        }
       } else if (signal.action === 'SELL' && signal.prob >= 60 && isHolding) {
         this.addLog(`[Signal Server ML] ${item.symbol}: SELL (${signal.prob}% prob). Executăm vânzare automat.`, 'info');
         await this.executeTrade(item.symbol, 'SELL', item.price, pos!.amount);

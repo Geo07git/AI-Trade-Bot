@@ -21,6 +21,7 @@ interface TradingStore {
   watchlist: WatchlistItem[];
   positions: Position[];
   logs: { time: string; message: string; type: 'info' | 'success' | 'warning'; equity?: number }[];
+  maxLogs: number;
   autoTradingActive: boolean;
   dataInterval: number;
   analysisInterval: number;
@@ -48,6 +49,8 @@ interface TradingStore {
   toggleWatchlistActive: (symbol: string) => void;
   executeTrade: (symbol: string, action: 'BUY' | 'SELL', price: number, amount: number) => void;
   addLog: (message: string, type?: 'info' | 'success' | 'warning') => void;
+  setMaxLogs: (limit: number) => void;
+  clearLogs: () => void;
   setAutoTradingActive: (active: boolean) => void;
   setDataInterval: (seconds: number) => void;
   setAnalysisInterval: (seconds: number) => void;
@@ -66,8 +69,8 @@ interface TradingStore {
 export const useTradingStore = create<TradingStore>()(
   persist(
     (set) => ({
-  balance: 10000,
-  initialBalance: 10000,
+  balance: 100,
+  initialBalance: 100,
   watchlist: [
     { symbol: 'BTCUSDT', price: null, signal: null, active: true },
     { symbol: 'ETHUSDT', price: null, signal: null, active: true },
@@ -87,6 +90,7 @@ export const useTradingStore = create<TradingStore>()(
   ],
   positions: [],
   logs: [],
+  maxLogs: 1000,
   autoTradingActive: true,
   dataInterval: 30, // 30 seconds
   analysisInterval: 60, // 1 minute
@@ -221,10 +225,28 @@ export const useTradingStore = create<TradingStore>()(
       hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
     });
     const time = timeFormatter.format(new Date());
+    const limit = state.maxLogs || 1000;
     return {
-      logs: [{ time, message, type }, ...state.logs]
+      logs: [{ time, message, type }, ...state.logs.slice(0, limit - 1)]
     };
   }),
+
+  setMaxLogs: (limit) => {
+    set((state) => ({
+      maxLogs: limit,
+      logs: state.logs.slice(0, limit)
+    }));
+    fetch('/api/bot/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ maxLogs: limit })
+    }).catch(() => {});
+  },
+
+  clearLogs: () => {
+    set({ logs: [] });
+    fetch('/api/bot/clear-logs', { method: 'POST' }).catch(() => {});
+  },
 
   setAutoTradingActive: (active) => {
     set({ autoTradingActive: active });

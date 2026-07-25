@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { useTradingStore } from '../store';
 import { fetchLivePrice, fetchChartData } from '../services/api';
-import { ArrowUpRight, ArrowDownRight, Wallet, TrendingUp, AlertTriangle, Trash2 } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Wallet, TrendingUp, AlertTriangle, Trash2, Newspaper, ExternalLink } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { NewsArticle } from '../types';
 
 function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -16,6 +17,16 @@ export function Dashboard() {
   
   const [activeChartId, setActiveChartId] = useState('PORTFOLIO');
   const [assetChartData, setAssetChartData] = useState<{time: string, value: number}[]>([]);
+  const [recentNews, setRecentNews] = useState<NewsArticle[]>([]);
+
+  useEffect(() => {
+    fetch('/api/news')
+      .then(res => res.json())
+      .then(data => {
+        if (data.articles) setRecentNews(data.articles.slice(0, 3));
+      })
+      .catch(err => console.debug('News fetch error on dashboard:', err));
+  }, []);
 
   const equity = balance + positions.reduce((acc, pos) => acc + (pos.amount * (pos.currentPrice || pos.entryPrice)), 0);
   const dayChange = equity - initialBalance;
@@ -333,6 +344,48 @@ export function Dashboard() {
                   );
                 })
               )}
+            </div>
+
+            {/* Live Binance & Crypto News Widget */}
+            <div className="mt-8 pt-6 border-t border-white/5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-serif text-sm font-semibold text-white flex items-center gap-2">
+                  <Newspaper className="w-4 h-4 text-amber-400" />
+                  Ştiri Binance Live
+                </h3>
+                <span className="text-[10px] text-emerald-400 font-mono bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">LIVE</span>
+              </div>
+
+              <div className="space-y-3">
+                {recentNews.length === 0 ? (
+                  <p className="text-xs text-zinc-500 font-mono">Se încarcă știrile...</p>
+                ) : (
+                  recentNews.map((item) => (
+                    <a
+                      key={item.id}
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block p-3 bg-zinc-800/30 hover:bg-zinc-800/70 border border-white/5 rounded-xl transition-colors group"
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="text-[10px] font-mono text-amber-400/90 font-semibold">{item.source}</span>
+                        <span className={cn(
+                          "text-[9px] font-mono px-1.5 py-0.2 rounded uppercase font-bold",
+                          item.sentiment === 'bullish' && "bg-emerald-500/10 text-emerald-400",
+                          item.sentiment === 'bearish' && "bg-rose-500/10 text-rose-400",
+                          item.sentiment === 'neutral' && "bg-zinc-700/50 text-zinc-400"
+                        )}>
+                          {item.sentiment}
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-200 group-hover:text-white font-medium line-clamp-2">
+                        {item.title}
+                      </p>
+                    </a>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </div>

@@ -1,4 +1,17 @@
-export type ViewState = 'dashboard' | 'strategies' | 'backtesting' | 'analyst' | 'alerts' | 'logs' | 'settings' | 'guide';
+export type ViewState = 'dashboard' | 'strategies' | 'backtesting' | 'analyst' | 'news' | 'alerts' | 'logs' | 'settings' | 'guide';
+
+export interface NewsArticle {
+  id: string;
+  title: string;
+  url: string;
+  source: string;
+  publishedAt: string;
+  categories: string[];
+  summary: string;
+  sentiment: 'bullish' | 'bearish' | 'neutral';
+  imageUrl?: string;
+  relatedSymbols?: string[];
+}
 
 export interface Position {
   id: string;

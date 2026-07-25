@@ -14,6 +14,7 @@ import { Strategies } from './components/Strategies';
 import { Alerts } from './components/Alerts';
 import { UserGuide } from './components/UserGuide';
 import { Backtesting } from './components/Backtesting';
+import { NewsFeed } from './components/NewsFeed';
 import { Settings } from './components/Settings';
 import { useTradingStore } from './store';
 import { sendWebPush, sendNotificationMessage } from './services/notifications';
@@ -63,6 +64,7 @@ export default function App() {
             logs: data.logs,
             watchlist: data.watchlist,
             autoTradingActive: data.autoTradingActive,
+            maxLogs: data.maxLogs || useTradingStore.getState().maxLogs || 1000,
             notificationProvider: data.notificationProvider || useTradingStore.getState().notificationProvider,
             discordWebhookUrl: data.discordWebhookUrl || useTradingStore.getState().discordWebhookUrl,
             telegramBotToken: data.telegramBotToken || useTradingStore.getState().telegramBotToken,
@@ -161,6 +163,7 @@ export default function App() {
         {currentView === 'dashboard' && <Dashboard />}
         {currentView === 'strategies' && <Strategies />}
         {currentView === 'analyst' && <AIAnalyst />}
+        {currentView === 'news' && <NewsFeed />}
         {currentView === 'alerts' && <Alerts />}
         {currentView === 'logs' && <TradeLogs />}
         {currentView === 'settings' && <Settings />}
