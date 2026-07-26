@@ -4,6 +4,8 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { botEngine } from './server/bot';
 import { strategyLab } from './server/strategyLab';
+import { getAccountInfo, getMyTrades, getOpenOrders } from './server/services/BinanceService';
+import { journalService } from './server/services/JournalService';
 
 async function startServer() {
   const app = express();
@@ -44,7 +46,12 @@ async function startServer() {
     const { regime } = req.body;
     if (regime) {
       strategyLab.setRegime(regime);
-      return res.json({ success: true, regime: strategyLab.getRegime() });
+      return res.json({
+        success: true,
+        regime: strategyLab.getRegime(),
+        strategies: strategyLab.getStrategies(),
+        stats: strategyLab.getPipelineStats()
+      });
     }
     res.status(400).json({ error: 'Missing regime' });
   });
@@ -73,6 +80,16 @@ async function startServer() {
     res.json({ success: true, state: botEngine.state });
   });
 
+  app.post('/api/bot/reset-circuit-breaker', (req, res) => {
+    botEngine.resetCircuitBreaker();
+    res.json({ success: true, state: botEngine.state });
+  });
+
+  app.post('/api/bot/sync-binance', async (req, res) => {
+    const result = await botEngine.syncBinanceBalance();
+    res.json({ ...result, state: botEngine.state, calculatedEquity: botEngine.calculateEquity() });
+  });
+
   app.post('/api/bot/trade', async (req, res) => {
     const { symbol, action, price, amount } = req.body;
     if (symbol && action && price && amount) {
@@ -80,6 +97,86 @@ async function startServer() {
       return res.json({ success: true, state: botEngine.state });
     }
     res.status(400).json({ error: 'Missing parameters' });
+  });
+
+  // Dedicated Binance Service Routes (Account Info & Trade History)
+  app.get('/api/binance/account', async (req, res) => {
+    try {
+      const mode = botEngine.state.binanceMode;
+      const apiKey = mode === 'testnet' ? (botEngine.state.testnetApiKey || botEngine.state.apiKey) : botEngine.state.apiKey;
+      const apiSecret = mode === 'testnet' ? (botEngine.state.testnetApiSecret || botEngine.state.apiSecret) : botEngine.state.apiSecret;
+
+      if (!apiKey || !apiSecret) {
+        return res.status(400).json({ success: false, error: 'Cheile API Binance nu sunt configurate în setări.' });
+      }
+
+      const info = await getAccountInfo({ apiKey, apiSecret, mode });
+      res.json({ success: true, mode, account: info });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Eroare la preluarea contului Binance' });
+    }
+  });
+
+  app.get('/api/binance/trades', async (req, res) => {
+    try {
+      const symbol = (req.query.symbol as string) || 'BTCUSDT';
+      const mode = botEngine.state.binanceMode;
+      const apiKey = mode === 'testnet' ? (botEngine.state.testnetApiKey || botEngine.state.apiKey) : botEngine.state.apiKey;
+      const apiSecret = mode === 'testnet' ? (botEngine.state.testnetApiSecret || botEngine.state.apiSecret) : botEngine.state.apiSecret;
+
+      if (!apiKey || !apiSecret) {
+        return res.status(400).json({ success: false, error: 'Cheile API Binance nu sunt configurate în setări.' });
+      }
+
+      const trades = await getMyTrades(symbol, { apiKey, apiSecret, mode });
+      res.json({ success: true, mode, symbol, trades });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Eroare la preluarea istoricului de tranzacții Binance' });
+    }
+  });
+
+  // Trading Journal API Endpoints
+  app.get('/api/journal/entries', (req, res) => {
+    try {
+      const { symbol, modelName, date, action, mode } = req.query;
+      const entries = journalService.getEntries({
+        symbol: symbol as string,
+        modelName: modelName as string,
+        date: date as string,
+        action: action as any,
+        mode: mode as string
+      });
+      res.json({ success: true, count: entries.length, entries });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Eroare la preluarea jurnalului de tranzacționare' });
+    }
+  });
+
+  app.post('/api/journal/entry', (req, res) => {
+    try {
+      const entry = journalService.addJournalEntry(req.body);
+      res.json({ success: true, entry });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Eroare la salvarea tranzacției în jurnal' });
+    }
+  });
+
+  app.get('/api/journal/daily-snapshots', (req, res) => {
+    try {
+      const snapshots = journalService.getSnapshots();
+      res.json({ success: true, snapshots });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Eroare la preluarea snapshot-urilor zilnice' });
+    }
+  });
+
+  app.get('/api/journal/analytics', (req, res) => {
+    try {
+      const analytics = journalService.getAnalytics();
+      res.json({ success: true, analytics });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Eroare la calcularea metricilor jurnalului' });
+    }
   });
 
   // Live Crypto & Binance News API Route

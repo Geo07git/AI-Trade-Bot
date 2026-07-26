@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { useTradingStore } from '../store';
 import { fetchLivePrice, fetchChartData } from '../services/api';
-import { ArrowUpRight, ArrowDownRight, Wallet, TrendingUp, AlertTriangle, Trash2, Newspaper, ExternalLink } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Wallet, TrendingUp, AlertTriangle, Trash2, Newspaper, ExternalLink, RefreshCw, ShoppingCart, ArrowUpCircle, ArrowDownCircle, Zap, CheckCircle2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { NewsArticle } from '../types';
@@ -12,12 +12,34 @@ function cn(...inputs: (string | undefined | null | false)[]) {
 }
 
 export function Dashboard() {
-  const { balance, positions, watchlist, logs, initialBalance, updatePrice, addWatchlist, toggleWatchlistActive, removeWatchlist, autoTradingActive, setAutoTradingActive } = useTradingStore();
+  const { 
+    balance, 
+    positions, 
+    watchlist, 
+    logs, 
+    initialBalance, 
+    updatePrice, 
+    addWatchlist, 
+    toggleWatchlistActive, 
+    removeWatchlist, 
+    autoTradingActive, 
+    setAutoTradingActive, 
+    binanceMode, 
+    syncBinanceBalance,
+    executeTrade
+  } = useTradingStore();
+
   const [newSymbol, setNewSymbol] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
   
   const [activeChartId, setActiveChartId] = useState('PORTFOLIO');
   const [assetChartData, setAssetChartData] = useState<{time: string, value: number}[]>([]);
   const [recentNews, setRecentNews] = useState<NewsArticle[]>([]);
+
+  // State for Quick Trade Widget
+  const [tradeSymbol, setTradeSymbol] = useState('BTCUSDT');
+  const [tradeAmountUsdt, setTradeAmountUsdt] = useState<number>(50);
+  const [tradeMessage, setTradeMessage] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/news')
@@ -86,21 +108,36 @@ export function Dashboard() {
     return `${maxDD.toFixed(2)}%`;
   }, [displayChartData]);
 
-  const sharpeRatio = React.useMemo(() => {
-    if (displayChartData.length < 2) return "0.00";
-    const returns = [];
+  const { sharpeNum, sharpeRatioStr } = React.useMemo(() => {
+    if (displayChartData.length < 2) return { sharpeNum: 0, sharpeRatioStr: "0.00" };
+    const returns: number[] = [];
     for (let i = 1; i < displayChartData.length; i++) {
-      returns.push((displayChartData[i].value - displayChartData[i-1].value) / displayChartData[i-1].value);
+      const prev = displayChartData[i - 1].value;
+      if (prev > 0) {
+        returns.push((displayChartData[i].value - prev) / prev);
+      }
     }
+    if (returns.length === 0) return { sharpeNum: 0, sharpeRatioStr: "0.00" };
+
     const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
     const variance = returns.reduce((a, b) => a + Math.pow(b - avgReturn, 2), 0) / returns.length;
     const stdDev = Math.sqrt(variance);
-    
-    if (stdDev === 0) return "0.00";
-    // Simple pseudo-Sharpe based on data frequency
-    const sharpe = (avgReturn / stdDev) * Math.sqrt(displayChartData.length > 5 ? 24 * 365 : 365); 
-    
-    return sharpe.toFixed(2);
+
+    if (stdDev === 0) {
+      const fallbackVal = avgReturn > 0 ? 1 : (avgReturn < 0 ? -1 : 0);
+      return { sharpeNum: fallbackVal, sharpeRatioStr: fallbackVal.toFixed(2) };
+    }
+
+    // Standardize scaling according to sample size so small sample counts don't explode
+    const samples = returns.length;
+    const factor = samples >= 30 ? Math.sqrt(252) : Math.sqrt(Math.max(1, samples));
+    let val = (avgReturn / stdDev) * factor;
+
+    // Clamp extreme noise for UI clarity
+    if (val > 10) val = 10;
+    if (val < -10) val = -10;
+
+    return { sharpeNum: val, sharpeRatioStr: val.toFixed(2) };
   }, [displayChartData]);
 
   useEffect(() => {
@@ -117,6 +154,38 @@ export function Dashboard() {
     fetchAllPrices();
   }, [watchlist.map(w => w.symbol).join(','), updatePrice]);
 
+  const handleManualTrade = async (symbol: string, action: 'BUY' | 'SELL', usdtAmount: number) => {
+    let price = watchlist.find(w => w.symbol === symbol)?.price;
+    if (!price || price <= 0) {
+      price = await fetchLivePrice(symbol);
+    }
+    
+    if (!price || price <= 0) {
+      setTradeMessage(`❌ Eroare: Prețul pentru ${symbol} nu s-a putut prelua.`);
+      return;
+    }
+
+    if (action === 'BUY') {
+      if (balance < usdtAmount) {
+        setTradeMessage(`❌ Fonduri insuficiente! Cash disponibil: $${balance.toFixed(2)} USDT.`);
+        return;
+      }
+      const qty = usdtAmount / price;
+      executeTrade(symbol, 'BUY', price, qty);
+      setTradeMessage(`✅ Ordin Cumpărare executat: ${qty.toFixed(4)} ${symbol} ($${usdtAmount} USDT)`);
+    } else {
+      const pos = positions.find(p => p.symbol === symbol);
+      if (!pos || pos.amount <= 0) {
+        setTradeMessage(`❌ Nu aveți nicio poziție deschisă pe ${symbol}.`);
+        return;
+      }
+      executeTrade(symbol, 'SELL', price, pos.amount);
+      setTradeMessage(`✅ Ordin Vânzare executat: Închisă poziția de ${symbol} @ $${price.toFixed(2)}`);
+    }
+
+    setTimeout(() => setTradeMessage(null), 6000);
+  };
+
   const handleAddSymbol = () => {
     if (newSymbol.trim()) {
       addWatchlist(newSymbol.trim().toUpperCase());
@@ -129,20 +198,41 @@ export function Dashboard() {
       <header className="min-h-20 border-b border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between px-4 sm:px-8 py-3 md:py-0 bg-zinc-900/10 backdrop-blur-md shrink-0 gap-3">
         <div className="flex flex-wrap items-center gap-4 sm:gap-8 w-full md:w-auto">
           <div>
-            <p className="text-[10px] uppercase text-zinc-500 tracking-wider mb-0.5">Capital Virtual</p>
+            <p className="text-[10px] uppercase text-zinc-500 tracking-wider mb-0.5">
+              {binanceMode === 'testnet' ? 'Capital Testnet' : binanceMode === 'live' ? 'Capital Real Binance' : 'Capital Virtual (Paper)'}
+            </p>
             <p className="font-serif text-lg sm:text-xl font-medium">${Number(equity || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} <span className={cn("text-xs sm:text-sm font-sans ml-1", dayChangePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>{dayChangePercent >= 0 ? '+' : ''}{(dayChangePercent || 0).toFixed(2)}%</span></p>
           </div>
           <div>
-            <p className="text-[10px] uppercase text-zinc-500 tracking-wider mb-0.5">Profit Virtual</p>
+            <p className="text-[10px] uppercase text-zinc-500 tracking-wider mb-0.5">
+              {binanceMode === 'testnet' ? 'Profit Testnet' : binanceMode === 'live' ? 'Profit Real' : 'Profit Virtual'}
+            </p>
             <p className={cn("font-serif text-lg sm:text-xl font-medium", dayChange >= 0 ? "text-emerald-400" : "text-rose-400")}>{dayChange >= 0 ? '+' : ''}${Number(dayChange || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
           </div>
           <div>
-            <p className="text-[10px] uppercase text-zinc-500 tracking-wider mb-0.5">Cash Disponibil</p>
+            <p className="text-[10px] uppercase text-zinc-500 tracking-wider mb-0.5">Cash USDT Liber</p>
             <p className="font-serif text-lg sm:text-xl font-medium">${Number(balance || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
           </div>
         </div>
         
         <div className="flex flex-wrap items-center gap-2 sm:gap-4 w-full md:w-auto justify-between md:justify-end">
+          {binanceMode !== 'paper' && (
+            <button
+              type="button"
+              disabled={isSyncing}
+              onClick={async () => {
+                setIsSyncing(true);
+                await syncBinanceBalance();
+                setIsSyncing(false);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+              title="Sincronizează balanța din contul Binance Testnet / Live"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", isSyncing && "animate-spin")} />
+              <span>Sincronizează Balanța</span>
+            </button>
+          )}
+
           <button 
             onClick={() => setAutoTradingActive(!autoTradingActive)}
             className={cn(
@@ -156,73 +246,121 @@ export function Dashboard() {
             <span className={cn("w-2 h-2 rounded-full", autoTradingActive ? "bg-emerald-400 animate-pulse" : "bg-rose-500")}></span>
             {autoTradingActive ? "Server 24/7: ACTIV (Stop)" : "Server 24/7: OPRIT (Start)"}
           </button>
-          <div className="px-3 py-1.5 border border-white/10 rounded-full text-[11px] sm:text-xs text-zinc-400">Binance API</div>
+          
+          <div className={cn(
+            "px-3 py-1.5 border rounded-full text-[11px] sm:text-xs font-medium",
+            binanceMode === 'testnet' 
+              ? "bg-amber-500/10 border-amber-500/30 text-amber-300"
+              : binanceMode === 'live'
+              ? "bg-rose-500/10 border-rose-500/30 text-rose-300"
+              : "border-white/10 text-zinc-400"
+          )}>
+            {binanceMode === 'testnet' ? 'Binance Testnet' : binanceMode === 'live' ? 'Binance LIVE' : 'Paper Mode'}
+          </div>
         </div>
       </header>
 
       <div className="p-8 overflow-y-auto flex-1 space-y-6">
         <div className="grid grid-cols-12 gap-6">
           {/* Chart Section */}
-          <div className="col-span-12 xl:col-span-8 bg-zinc-900/50 border border-white/5 rounded-2xl p-6 relative">
-            <div className="flex justify-between items-start mb-6">
+          <div className="col-span-12 bg-zinc-900/50 border border-white/5 rounded-2xl p-6 relative overflow-x-auto">
+            <div className="flex justify-between items-center mb-6">
               <div>
                 <h2 className="font-serif text-lg text-white">Performanță / Istoric (24h)</h2>
-                <div className="flex gap-2 mt-2">
-                  <button 
-                    onClick={() => setActiveChartId('PORTFOLIO')}
-                    className={`px-3 py-1 text-xs rounded transition-colors ${activeChartId === 'PORTFOLIO' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-white/5 text-zinc-400 border border-white/5'}`}>
-                    Portofoliu Global
-                  </button>
-                  {watchlist.filter(w => w.active).map(w => (
-                    <button 
+                <p className="text-xs text-zinc-400 mt-0.5">Grafic în timp real: <span className="font-mono font-bold text-emerald-400">{activeChartId === 'PORTFOLIO' ? 'Portofoliu Global' : activeChartId}</span></p>
+              </div>
+              <div className="flex gap-2">
+                <span className="px-2 py-1 bg-white/10 text-white rounded text-[10px] font-mono">1D (Binance Klines)</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col xl:flex-row gap-6 items-start overflow-x-auto pb-2">
+              {/* Left Side: Chart Area with exact 1045px width and 600px height */}
+              <div className="w-[720px] shrink-0 h-[360px]" style={{ width: '720px', height: '360px' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={displayChartData}>
+                    <defs>
+                      <linearGradient id="colorEquity" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                    <XAxis dataKey="time" stroke="#52525b" fontSize={10} tickLine={false} axisLine={false} />
+                    <YAxis 
+                      domain={['dataMin', 'dataMax']} 
+                      stroke="#52525b" 
+                      fontSize={10} 
+                      tickLine={false} 
+                      axisLine={false}
+                      tickFormatter={(value) => activeChartId === 'PORTFOLIO' ? `$${(Number(value) / 1000).toFixed(1)}k` : `$${Number(value || 0).toLocaleString()}`}
+                    />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px', color: '#f4f4f5', fontSize: '12px', fontFamily: 'monospace' }}
+                      itemStyle={{ color: '#10b981' }}
+                      formatter={(value: any) => [`$${Number(value || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 6})}`, activeChartId === 'PORTFOLIO' ? 'Portofoliu' : activeChartId]}
+                    />
+                    <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', color: '#a1a1aa' }} />
+                    <Area 
+                      type="monotone" 
+                      dataKey="value" 
+                      name={activeChartId === 'PORTFOLIO' ? 'Portofoliu Global' : activeChartId}
+                      stroke="#10b981" 
+                      strokeWidth={2} 
+                      fillOpacity={1} 
+                      fill="url(#colorEquity)" 
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Right Side Column: Grouped Watchlist Coins */}
+              <div className="w-full xl:w-72 shrink-0 h-[300px] bg-zinc-950/70 border border-white/5 rounded-xl p-3 flex flex-col gap-2">
+                <div className="flex items-center justify-between pb-1.5 border-b border-white/5">
+                  <span className="text-[10px] uppercase font-mono tracking-wider text-zinc-400">Selectează Grafic</span>
+                  <span className="text-[10px] font-mono text-zinc-500">{watchlist.length} Monede</span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveChartId('PORTFOLIO')}
+                  className={cn(
+                    "w-full px-2.5 py-1.5 text-xs rounded-lg transition-colors font-medium flex items-center justify-between border cursor-pointer shrink-0",
+                    activeChartId === 'PORTFOLIO' 
+                      ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-bold shadow-sm" 
+                      : "bg-white/5 text-zinc-300 border-white/5 hover:bg-white/10"
+                  )}
+                >
+                  <span>📊 Portofoliu Global</span>
+                  {activeChartId === 'PORTFOLIO' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>}
+                </button>
+
+                <div className="text-[9px] uppercase font-mono tracking-wider text-zinc-500 mt-1 shrink-0">
+                  Active din Watchlist
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5 flex-1 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-zinc-800">
+                  {watchlist.map(w => (
+                    <button
                       key={w.symbol}
+                      type="button"
                       onClick={() => setActiveChartId(w.symbol)}
-                      className={`px-3 py-1 text-xs rounded transition-colors ${activeChartId === w.symbol ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-white/5 text-zinc-400 border border-white/5'}`}>
-                      {w.symbol}
+                      className={cn(
+                        "px-2 py-1 text-[10px] font-mono rounded transition-colors text-left flex items-center justify-between border cursor-pointer truncate",
+                        activeChartId === w.symbol
+                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 font-bold"
+                          : w.active
+                          ? "bg-zinc-800/80 text-zinc-300 border-white/5 hover:bg-zinc-700/80"
+                          : "bg-zinc-900/40 text-zinc-500 border-white/5 hover:text-zinc-300"
+                      )}
+                      title={`Afișează evoluția ${w.symbol}`}
+                    >
+                      <span className="truncate">{w.symbol.replace('USDT', '')}</span>
+                      <span className="text-[8px] opacity-50">USDT</span>
                     </button>
                   ))}
                 </div>
               </div>
-              <div className="flex gap-2">
-                <span className="px-2 py-1 bg-white/10 text-white rounded text-[10px]">1D (Binance Klines)</span>
-              </div>
-            </div>
-            <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={displayChartData}>
-                  <defs>
-                    <linearGradient id="colorEquity" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                  <XAxis dataKey="time" stroke="#52525b" fontSize={10} tickLine={false} axisLine={false} />
-                  <YAxis 
-                    domain={['dataMin', 'dataMax']} 
-                    stroke="#52525b" 
-                    fontSize={10} 
-                    tickLine={false} 
-                    axisLine={false}
-                    tickFormatter={(value) => activeChartId === 'PORTFOLIO' ? `$${(Number(value) / 1000).toFixed(1)}k` : `$${Number(value || 0).toLocaleString()}`}
-                  />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px', color: '#f4f4f5', fontSize: '12px', fontFamily: 'monospace' }}
-                    itemStyle={{ color: '#10b981' }}
-                    formatter={(value: any) => [`$${Number(value || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 6})}`, activeChartId === 'PORTFOLIO' ? 'Portofoliu' : activeChartId]}
-                  />
-                  <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', color: '#a1a1aa' }} />
-                  <Area 
-                    type="monotone" 
-                    dataKey="value" 
-                    name={activeChartId === 'PORTFOLIO' ? 'Portofoliu Global' : activeChartId}
-                    stroke="#10b981" 
-                    strokeWidth={2} 
-                    fillOpacity={1} 
-                    fill="url(#colorEquity)" 
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
             </div>
 
             
@@ -237,7 +375,99 @@ export function Dashboard() {
               </div>
               <div className="p-4 bg-zinc-800/40 rounded-xl border border-white/5">
                 <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">Sharpe Ratio</p>
-                <p className="text-xl font-serif text-emerald-400">{sharpeRatio}</p>
+                <p className={cn(
+                  "text-xl font-serif font-bold",
+                  sharpeNum > 0 ? "text-emerald-400" : sharpeNum < 0 ? "text-rose-400" : "text-zinc-400"
+                )}>
+                  {sharpeRatioStr}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Manual Trade Panel */}
+          <div className="col-span-12 bg-zinc-900/50 border border-white/5 rounded-2xl p-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+              <div>
+                <h2 className="font-serif text-lg text-white flex items-center gap-2">
+                  <Zap className="w-5 h-5 text-amber-400" />
+                  Tranzacționare Rapidă Spot (Ordin Cumpărare / Vânzare Instant)
+                </h2>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Lansați manual un ordin pe {binanceMode === 'testnet' ? 'Binance Testnet' : binanceMode === 'live' ? 'Binance Real (LIVE)' : 'Paper Mode (Virtual)'}
+                </p>
+              </div>
+
+              {tradeMessage && (
+                <div className="px-3 py-1.5 rounded-lg text-xs font-mono bg-zinc-800 border border-white/10 text-emerald-300 flex items-center gap-2">
+                  <span>{tradeMessage}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end">
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1 font-mono">Selectează Moneda</label>
+                <select
+                  value={tradeSymbol}
+                  onChange={(e) => setTradeSymbol(e.target.value)}
+                  className="w-full bg-zinc-800 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-amber-500/50"
+                >
+                  {watchlist.map(item => (
+                    <option key={item.symbol} value={item.symbol}>
+                      {item.symbol} {item.price ? `($${Number(item.price).toFixed(2)})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1 font-mono">Suma în USDT</label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min={5}
+                    step={10}
+                    value={tradeAmountUsdt}
+                    onChange={(e) => setTradeAmountUsdt(Number(e.target.value))}
+                    className="w-full bg-zinc-800 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-amber-500/50"
+                  />
+                  <div className="flex gap-1 shrink-0">
+                    {[20, 50, 100].map(amt => (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => setTradeAmountUsdt(amt)}
+                        className={cn(
+                          "px-2 py-1.5 rounded text-[10px] font-mono border transition-colors",
+                          tradeAmountUsdt === amt ? "bg-amber-500/20 text-amber-300 border-amber-500/40" : "bg-zinc-800 text-zinc-400 border-white/5 hover:text-white"
+                        )}
+                      >
+                        ${amt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-2 col-span-1 sm:col-span-2 md:col-span-2">
+                <button
+                  type="button"
+                  onClick={() => handleManualTrade(tradeSymbol, 'BUY', tradeAmountUsdt)}
+                  className="flex-1 px-4 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-lg font-mono text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  <ArrowUpCircle className="w-4 h-4 text-emerald-400" />
+                  <span>CUMPĂRĂ ({tradeSymbol})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleManualTrade(tradeSymbol, 'SELL', tradeAmountUsdt)}
+                  className="flex-1 px-4 py-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-lg font-mono text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  <ArrowDownCircle className="w-4 h-4 text-rose-400" />
+                  <span>VINDE / ÎNCHIDE</span>
+                </button>
               </div>
             </div>
           </div>
@@ -269,8 +499,8 @@ export function Dashboard() {
                   <tr>
                     <th className="pb-3 font-medium">Activ (Binance)</th>
                     <th className="pb-3 font-medium">Preț Curent</th>
-                    <th className="pb-3 font-medium text-right">Semnal AI (Local)</th>
-                    <th className="pb-3 font-medium text-right">Acțiuni</th>
+                    <th className="pb-3 font-medium text-right">Semnal AI</th>
+                    <th className="pb-3 font-medium text-right">Acțiuni Rapid</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
@@ -282,11 +512,19 @@ export function Dashboard() {
                         {item.signal ? `${item.signal.action} (${item.signal.prob}%)` : '-'}
                       </td>
                       <td className="py-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleManualTrade(item.symbol, 'BUY', 50)}
+                            className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[11px] font-bold transition-colors"
+                            title="Cumpără $50 USDT din această monedă"
+                          >
+                            +Cumpără $50
+                          </button>
                           <button 
                             onClick={() => toggleWatchlistActive(item.symbol)}
-                            className={`px-3 py-1 text-xs transition-colors rounded border ${item.active ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 font-bold' : 'bg-white/5 hover:bg-white/10 text-white border-white/5'}`}>
-                            {item.active ? 'Activ' : 'Urmărește'}
+                            className={`px-2.5 py-1 text-[11px] transition-colors rounded border ${item.active ? 'bg-amber-500/10 border-amber-500/20 text-amber-300 font-bold' : 'bg-white/5 hover:bg-white/10 text-white border-white/5'}`}>
+                            {item.active ? 'Activ' : 'Inactiv'}
                           </button>
                           <button 
                             onClick={() => removeWatchlist(item.symbol)}
@@ -308,11 +546,13 @@ export function Dashboard() {
           <div className="col-span-12 xl:col-span-4 bg-zinc-900/50 border border-white/5 rounded-2xl p-6">
             <h2 className="font-serif text-lg mb-6 flex items-center gap-2">
               <span className="w-2 h-2 bg-blue-500 rounded-full shadow-[0_0_8px_blue]"></span>
-              Poziții Curente (Virtuale)
+              Poziții Curente ({binanceMode === 'testnet' ? 'Testnet' : binanceMode === 'live' ? 'Live' : 'Paper'})
             </h2>
             <div className="space-y-4">
               {positions.length === 0 ? (
-                <p className="text-sm text-zinc-500 text-center py-8 border border-white/5 rounded-xl border-dashed">Nicio poziție deschisă. Rulează modelul ML pentru a genera tranzacții automate.</p>
+                <p className="text-sm text-zinc-500 text-center py-8 border border-white/5 rounded-xl border-dashed">
+                  Nicio poziție deschisă. Apăsați "+Cumpără $50" de mai sus sau lăsați serverul 24/7 activ.
+                </p>
               ) : (
                 positions.map((pos, i) => {
                   const currentPrice = pos.currentPrice || pos.entryPrice;
@@ -321,17 +561,18 @@ export function Dashboard() {
                   const plPercent = (pl / (pos.entryPrice * pos.amount)) * 100;
                   
                   return (
-                    <div key={i} className="p-4 bg-zinc-800/40 rounded-xl border border-white/5 flex flex-col">
-                      <div className="flex justify-between items-start mb-2">
+                    <div key={i} className="p-4 bg-zinc-800/40 rounded-xl border border-white/5 flex flex-col gap-3">
+                      <div className="flex justify-between items-start">
                         <p className="text-[12px] font-bold text-zinc-200 tracking-wider">{pos.symbol}</p>
                         <p className={cn("text-xs font-mono font-bold", pl >= 0 ? "text-emerald-400" : "text-rose-400")}>
                           {pl >= 0 ? '+' : ''}{plPercent.toFixed(2)}%
                         </p>
                       </div>
+
                       <div className="flex justify-between items-end">
                         <div>
                            <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Value (Qty)</p>
-                           <p className="text-sm font-mono text-zinc-300">${Number(value || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} <span className="text-xs text-zinc-500">({pos.amount})</span></p>
+                           <p className="text-sm font-mono text-zinc-300">${Number(value || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} <span className="text-xs text-zinc-500">({pos.amount.toFixed(4)})</span></p>
                         </div>
                         <div className="text-right">
                            <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">P&L / Entry</p>
@@ -340,6 +581,15 @@ export function Dashboard() {
                            </p>
                         </div>
                       </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleManualTrade(pos.symbol, 'SELL', value)}
+                        className="w-full py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 rounded text-xs font-mono font-bold transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <ArrowDownCircle className="w-3.5 h-3.5 text-rose-400" />
+                        <span>Închide Poziția (Vinde {pos.symbol})</span>
+                      </button>
                     </div>
                   );
                 })

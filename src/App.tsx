@@ -21,7 +21,7 @@ import { useTradingStore } from './store';
 import { sendWebPush, sendNotificationMessage } from './services/notifications';
 import { generateSignal } from './services/ml';
 import { fetchLivePrice } from './services/api';
-import { Menu } from 'lucide-react';
+import { Menu, ShieldAlert } from 'lucide-react';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<ViewState>('dashboard');
@@ -30,6 +30,9 @@ export default function App() {
     balance, 
     setBalance, 
     autoTradingActive, 
+    circuitBreakerTriggered,
+    circuitBreakerReason,
+    resetCircuitBreaker,
     dataInterval,
     analysisInterval, 
     setAutoTradingActive, 
@@ -66,6 +69,8 @@ export default function App() {
             logs: data.logs,
             watchlist: data.watchlist,
             autoTradingActive: data.autoTradingActive,
+            circuitBreakerTriggered: !!data.circuitBreakerTriggered,
+            circuitBreakerReason: data.circuitBreakerReason || null,
             maxLogs: data.maxLogs || useTradingStore.getState().maxLogs || 1000,
             notificationProvider: data.notificationProvider || useTradingStore.getState().notificationProvider,
             discordWebhookUrl: data.discordWebhookUrl || useTradingStore.getState().discordWebhookUrl,
@@ -161,20 +166,49 @@ export default function App() {
         onCloseMobile={() => setIsMobileMenuOpen(false)}
       />
       
-      <main className="flex-1 h-full overflow-hidden relative">
-        {currentView === 'dashboard' && <Dashboard />}
-        {currentView === 'strategyLab' && <AIStrategyLab />}
-        {currentView === 'strategies' && <Strategies />}
-        {currentView === 'analyst' && <AIAnalyst />}
-        {currentView === 'news' && <NewsFeed />}
-        {currentView === 'alerts' && <Alerts />}
-        {currentView === 'logs' && <TradeLogs />}
-        {currentView === 'settings' && <Settings />}
-        {currentView === 'guide' && <UserGuide />}
-        
-        {/* Backtesting Module */}
-        {currentView === 'backtesting' && <Backtesting />}
+      <main className="flex-1 h-full overflow-hidden relative flex flex-col">
+        {/* Emergency Circuit Breaker Banner */}
+        {circuitBreakerTriggered && (
+          <div className="bg-gradient-to-r from-rose-950/90 via-red-900/90 to-rose-950/90 border-b border-rose-500/40 px-4 py-3 text-white flex flex-col md:flex-row items-center justify-between gap-3 shadow-lg z-20 shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-rose-500/20 border border-rose-500/40 rounded-xl text-rose-400 shrink-0 animate-bounce">
+                <ShieldAlert className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm text-rose-200">CIRCUIT BREAKER ACTIVAT (Limita +10% Profit / -5% Loss)</span>
+                  <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-rose-500/30 text-rose-300 border border-rose-400/30">Auto-Trade Oprit</span>
+                </div>
+                <p className="text-xs text-rose-300/90 mt-0.5">
+                  {circuitBreakerReason || "Pragul de siguranță (+10% Profit / -5% Pierdere) a fost atins. Serverul a oprit executarea automată și a trimis notificare pe Telegram."}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => resetCircuitBreaker()}
+                className="px-4 py-1.5 bg-rose-500 hover:bg-rose-600 text-white font-medium text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <span>Reluare Manual Trade / Reset</span>
+              </button>
+            </div>
+          </div>
+        )}
 
+        <div className="flex-1 overflow-hidden relative">
+          {currentView === 'dashboard' && <Dashboard />}
+          {currentView === 'strategyLab' && <AIStrategyLab />}
+          {currentView === 'strategies' && <Strategies />}
+          {currentView === 'analyst' && <AIAnalyst />}
+          {currentView === 'news' && <NewsFeed />}
+          {currentView === 'alerts' && <Alerts />}
+          {currentView === 'logs' && <TradeLogs />}
+          {currentView === 'settings' && <Settings />}
+          {currentView === 'guide' && <UserGuide />}
+          
+          {/* Backtesting Module */}
+          {currentView === 'backtesting' && <Backtesting />}
+        </div>
       </main>
     </div>
   );

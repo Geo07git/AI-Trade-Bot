@@ -23,10 +23,14 @@ interface TradingStore {
   logs: { time: string; message: string; type: 'info' | 'success' | 'warning'; equity?: number }[];
   maxLogs: number;
   autoTradingActive: boolean;
+  circuitBreakerTriggered: boolean;
+  circuitBreakerReason: string | null;
   dataInterval: number;
   analysisInterval: number;
   apiKey: string;
   apiSecret: string;
+  testnetApiKey: string;
+  testnetApiSecret: string;
   geminiApiKey: string;
   notificationProvider: 'discord' | 'telegram';
   discordWebhookUrl: string;
@@ -52,10 +56,13 @@ interface TradingStore {
   setMaxLogs: (limit: number) => void;
   clearLogs: () => void;
   setAutoTradingActive: (active: boolean) => void;
+  resetCircuitBreaker: () => void;
   setDataInterval: (seconds: number) => void;
   setAnalysisInterval: (seconds: number) => void;
   setApiKey: (key: string) => void;
   setApiSecret: (secret: string) => void;
+  setTestnetApiKey: (key: string) => void;
+  setTestnetApiSecret: (secret: string) => void;
   setGeminiApiKey: (key: string) => void;
   setNotificationProvider: (provider: 'discord' | 'telegram') => void;
   setDiscordWebhookUrl: (url: string) => void;
@@ -64,6 +71,7 @@ interface TradingStore {
   setTimezone: (timezone: string) => void;
   setBinanceMode: (mode: 'testnet' | 'live' | 'paper') => void;
   setReportConfig: (config: Partial<TradingStore['reportConfig']>) => void;
+  syncBinanceBalance: () => Promise<any>;
 }
 
 export const useTradingStore = create<TradingStore>()(
@@ -77,25 +85,39 @@ export const useTradingStore = create<TradingStore>()(
     { symbol: 'BNBUSDT', price: null, signal: null, active: true },
     { symbol: 'SOLUSDT', price: null, signal: null, active: true },
     { symbol: 'XRPUSDT', price: null, signal: null, active: true },
+    { symbol: 'DOGEUSDT', price: null, signal: null, active: true },
     { symbol: 'ADAUSDT', price: null, signal: null, active: true },
     { symbol: 'LINKUSDT', price: null, signal: null, active: true },
     { symbol: 'AVAXUSDT', price: null, signal: null, active: true },
-    { symbol: 'DOGEUSDT', price: null, signal: null, active: true },
     { symbol: 'SUIUSDT', price: null, signal: null, active: true },
+    { symbol: 'TONUSDT', price: null, signal: null, active: true },
+    { symbol: 'TRXUSDT', price: null, signal: null, active: true },
+    { symbol: 'LTCUSDT', price: null, signal: null, active: true },
+    { symbol: 'DOTUSDT', price: null, signal: null, active: true },
+    { symbol: 'APTUSDT', price: null, signal: null, active: true },
+    { symbol: 'ARBUSDT', price: null, signal: null, active: true },
+    { symbol: 'OPUSDT', price: null, signal: null, active: true },
     { symbol: 'NEARUSDT', price: null, signal: null, active: true },
     { symbol: 'ATOMUSDT', price: null, signal: null, active: true },
-    { symbol: 'ZAMAUSDT', price: null, signal: null, active: true },
-    { symbol: 'DEXEUSDT', price: null, signal: null, active: true },
-    { symbol: 'ACEUSDT', price: null, signal: null, active: true },
+    { symbol: 'FILUSDT', price: null, signal: null, active: true },
+    { symbol: 'INJUSDT', price: null, signal: null, active: true },
+    { symbol: 'SEIUSDT', price: null, signal: null, active: true },
+    { symbol: 'FETUSDT', price: null, signal: null, active: true },
+    { symbol: 'RENDERUSDT', price: null, signal: null, active: true },
+    { symbol: 'PEPEUSDT', price: null, signal: null, active: true },
   ],
   positions: [],
   logs: [],
   maxLogs: 1000,
   autoTradingActive: true,
+  circuitBreakerTriggered: false,
+  circuitBreakerReason: null,
   dataInterval: 30, // 30 seconds
   analysisInterval: 60, // 1 minute
   apiKey: '',
   apiSecret: '',
+  testnetApiKey: '',
+  testnetApiSecret: '',
   geminiApiKey: '',
   notificationProvider: 'discord',
   discordWebhookUrl: '',
@@ -256,6 +278,13 @@ export const useTradingStore = create<TradingStore>()(
       body: JSON.stringify({ autoTradingActive: active })
     }).catch(() => {});
   },
+
+  resetCircuitBreaker: () => {
+    set({ circuitBreakerTriggered: false, circuitBreakerReason: null, autoTradingActive: true });
+    fetch('/api/bot/reset-circuit-breaker', {
+      method: 'POST'
+    }).catch(() => {});
+  },
   setDataInterval: (seconds) => {
     set({ dataInterval: seconds });
     fetch('/api/bot/config', {
@@ -272,8 +301,38 @@ export const useTradingStore = create<TradingStore>()(
       body: JSON.stringify({ analysisInterval: seconds })
     }).catch(() => {});
   },
-  setApiKey: (key) => set({ apiKey: key }),
-  setApiSecret: (secret) => set({ apiSecret: secret }),
+  setApiKey: (key) => {
+    set({ apiKey: key });
+    fetch('/api/bot/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: key })
+    }).catch(() => {});
+  },
+  setApiSecret: (secret) => {
+    set({ apiSecret: secret });
+    fetch('/api/bot/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiSecret: secret })
+    }).catch(() => {});
+  },
+  setTestnetApiKey: (key) => {
+    set({ testnetApiKey: key });
+    fetch('/api/bot/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ testnetApiKey: key })
+    }).catch(() => {});
+  },
+  setTestnetApiSecret: (secret) => {
+    set({ testnetApiSecret: secret });
+    fetch('/api/bot/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ testnetApiSecret: secret })
+    }).catch(() => {});
+  },
   setGeminiApiKey: (key) => set({ geminiApiKey: key }),
   setNotificationProvider: (provider) => {
     set({ notificationProvider: provider });
@@ -321,7 +380,39 @@ export const useTradingStore = create<TradingStore>()(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ binanceMode: mode })
-    }).catch(() => {});
+    })
+      .then(() => {
+        fetch('/api/bot/sync-binance', { method: 'POST' })
+          .then(res => res.json())
+          .then(data => {
+            if (data && data.state) {
+              set({
+                balance: data.state.balance,
+                initialBalance: data.state.initialBalance,
+                logs: data.state.logs
+              });
+            }
+          })
+          .catch(() => {});
+      })
+      .catch(() => {});
+  },
+  syncBinanceBalance: async () => {
+    try {
+      const res = await fetch('/api/bot/sync-binance', { method: 'POST' });
+      const data = await res.json();
+      if (data && data.state) {
+        set({
+          balance: data.state.balance,
+          initialBalance: data.state.initialBalance,
+          logs: data.state.logs
+        });
+      }
+      return data;
+    } catch (e) {
+      console.error('Failed to sync binance balance', e);
+      return { success: false, error: 'Network error' };
+    }
   },
   setReportConfig: (config) => set((state) => {
     const newConfig = { ...state.reportConfig, ...config };

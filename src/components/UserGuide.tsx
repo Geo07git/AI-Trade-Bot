@@ -130,6 +130,49 @@ export function UserGuide() {
                   </p>
                 </div>
               </div>
+
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-rose-500/10 flex items-center justify-center shrink-0 border border-rose-500/20 text-rose-400 font-serif">4</div>
+                <div>
+                  <h3 className="font-serif text-lg text-rose-300 mb-1">Circuit Breaker de Siguranță (Stop Auto-Trade la +10% Profit / -5% Pierdere)</h3>
+                  <p className="text-sm text-zinc-400 font-sans leading-relaxed">
+                    Dacă într-un moment de tranzacționare portofoliul atinge o creștere de <strong>10% (Take Profit)</strong> sau o scădere de <strong>5% (Stop Loss)</strong>, sistemul declanșează automat protocolul de urgență:
+                    <br />• <strong>Stop Auto-Trade:</strong> Oprirea imediată a executării automate de noi ordine.
+                    <br />• <strong>Pauză Server 24/7:</strong> Serverul suspendă semnalele ML și păstrează starea intactă.
+                    <br />• <strong>Notificări Telegram & Web:</strong> Trimiterea unui mesaj urgență cu detaliile PnL și starea capitalului.
+                    <br />• <strong>Reluare Manual Trade:</strong> Tranzacționarea automată rămâne oprită până când utilizatorul apasă butonul <em>"Reluare Manual Trade"</em> în interfața web sau trimite comanda <code>/resume</code> pe Telegram.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-indigo-500/10 flex items-center justify-center shrink-0 border border-indigo-500/20 text-indigo-400 font-serif">5</div>
+                <div>
+                  <h3 className="font-serif text-lg text-indigo-300 mb-1">Sentimentul Pieței (Ex: -27 Frică) – Ce Înseamnă și La Ce Folosește?</h3>
+                  <p className="text-sm text-zinc-400 font-sans leading-relaxed">
+                    În secțiunea <strong>AI Analyst</strong>, indicele de sentiment variază de la <strong>-100 (Frică Extremă)</strong> la <strong>+100 (Lăcomie Extremă)</strong>:
+                    <br />• <strong>Ce înseamnă un scor negativ (Ex: -27 Frică):</strong> Arată că piața este într-o stare de anxietate, cu presiune moderată de vânzare și prudență generală din partea investitorilor.
+                    <br />• <strong>La ce ne folosește în algoritm:</strong> Algoritmul ML ajustează strategia în funcție de sentiment. În perioade de <em>Frică (-27)</em>, piața tinde să oscileze în canal (Range/Sideways). Algoritmul prioritizează strategiile de <strong>Mean Reversion (Cumpărare la Suport / RSI Supravândut)</strong> și activează ordine Stop Loss mai strânse. În schimb, un scor puternic pozitiv (+50..+80 Lăcomie) activează strategiile de <strong>Breakout & Trend Following</strong>.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0 border border-emerald-500/20 text-emerald-400 font-serif">6</div>
+                <div>
+                  <h3 className="font-serif text-lg text-emerald-300 mb-1">Arhitectura AI Strategy Lab (De la Ipoteză la Live Ready)</h3>
+                  <p className="text-sm text-zinc-400 font-sans leading-relaxed">
+                    AI Strategy Lab nu utilizează cifre fictive, ci un pipeline riguros de cercetare și filtrare matematică în 7 etape:
+                    <br />1. <strong>Generare Ipoteze LLM:</strong> Generarea combinatorie de reguli de intrare/ieșire și indicatori (EMA, RSI, VWAP, ATR).
+                    <br />2. <strong>Backtest Matematic Determinist:</strong> Calcularea exactă din matricea de tranzacții a meșei <em>Profit Factor = Gross Profit / Gross Loss</em>, Win Rate, Sharpe Ratio și Max Drawdown.
+                    <br />3. <strong>Clasificator ML Random Forest Ensemble:</strong> Evaluarea vectorilor de caracteristici prin 10 arbori decizionali independenți pentru verificarea probabilității de succes.
+                    <br />4. <strong>Validare Walk-Forward (5 Ferestre Out-Of-Sample):</strong> Testarea consistenței strategiei pe 5 perioade temporale distincte.
+                    <br />5. <strong>Simulări Bootstrap Monte Carlo (1000 Căi):</strong> Resamblarea aleatorie a istoricului de tranzacții pentru calcularea pragului de risc <em>95% Value-at-Risk (VaR)</em>.
+                    <br />6. <strong>Incubare Paper Trading:</strong> Rularea a 100-200 tranzacții simulative în timp real pentru confirmarea indicatorilor.
+                    <br />7. <strong>Aprobare Live Trading:</strong> Strategiile cu scor total peste 82/100 sunt promovate pentru executare automată de către Botul Server 24/7.
+                  </p>
+                </div>
+              </div>
             </div>
           </section>
 

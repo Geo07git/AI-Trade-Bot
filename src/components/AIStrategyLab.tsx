@@ -38,7 +38,7 @@ export interface StrategyHypothesis {
     exit: string[];
     indicators: string[];
   };
-  status: 'HYPOTHESIS' | 'BACKTESTED' | 'WALK_FORWARD_PASSED' | 'MONTE_CARLO_PASSED' | 'PAPER_TRADING' | 'LIVE_READY' | 'REJECTED';
+  status: 'HYPOTHESIS' | 'BACKTESTED' | 'ML_FILTER_PASSED' | 'WALK_FORWARD_PASSED' | 'MONTE_CARLO_PASSED' | 'PAPER_TRADING' | 'LIVE_READY' | 'REJECTED';
   metrics: {
     profitFactor: number;
     sharpeRatio: number;
@@ -49,9 +49,8 @@ export interface StrategyHypothesis {
   };
   mlScores: {
     randomForestProb: number;
-    xgboostProb: number;
-    lightgbmProb: number;
     ensembleScore: number;
+    treesApproved?: number;
   };
   aiConfidence: number;
   totalScore: number;
@@ -121,7 +120,7 @@ export function AIStrategyLab() {
       }, 800);
 
       setTimeout(() => {
-        setGenerationProgress(`Pasul 3/5: Evaluare Random Forest, XGBoost & LightGBM ML...`);
+        setGenerationProgress(`Pasul 3/5: Evaluare Random Forest Decision Trees ML Ensemble...`);
       }, 1600);
 
       setTimeout(() => {
@@ -179,6 +178,8 @@ export function AIStrategyLab() {
       if (res.ok) {
         const data = await res.json();
         if (data.regime) setRegimeInfo(data.regime);
+        if (data.strategies) setStrategies(data.strategies);
+        if (data.stats) setStats(data.stats);
       }
     } catch (err) {
       console.error('Error changing regime:', err);
@@ -203,11 +204,11 @@ export function AIStrategyLab() {
             </div>
             <h1 className="text-2xl font-semibold tracking-tight text-white">AI Strategy Lab</h1>
             <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              LLM + ML Ensemble Research Engine
+              LLM + Random Forest Ensemble Research Engine
             </span>
           </div>
           <p className="text-xs text-zinc-400 mt-1 max-w-2xl">
-            Generare automată de ipoteze, filtrare multi-stadiu prin ML (Random Forest/XGB/LGBM), validare Walk-Forward & Monte Carlo și incubare în Paper Trading înainte de activare live.
+            Generare automată de ipoteze, filtrare prin Random Forest Decision Tree Ensemble, validare Walk-Forward 5 ferestre & Monte Carlo 1000 simulări și incubare în Paper Trading înainte de activare live.
           </p>
         </div>
 
@@ -311,10 +312,10 @@ export function AIStrategyLab() {
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 text-center">
           {[
             { step: '1. AI Strategy Lab', desc: 'Generează 100-1000 ipoteze', icon: Sparkles, color: 'text-amber-400 border-amber-500/20 bg-amber-500/5', count: stats.generatedCount },
-            { step: '2. Fast Backtest', desc: 'Profit Factor > 1.35 & Win Rate > 50%', icon: BarChart3, color: 'text-blue-400 border-blue-500/20 bg-blue-500/5', count: stats.backtestPassedCount },
-            { step: '3. ML Prediction', desc: 'Random Forest + XGB + LGBM >= 60%', icon: Cpu, color: 'text-indigo-400 border-indigo-500/20 bg-indigo-500/5', count: stats.mlFilterPassedCount },
+            { step: '2. Fast Backtest', desc: 'Profit Factor > 1.30 & Win Rate > 48%', icon: BarChart3, color: 'text-blue-400 border-blue-500/20 bg-blue-500/5', count: stats.backtestPassedCount },
+            { step: '3. RF Ensemble', desc: 'Random Forest Tree Votes >= 50%', icon: Cpu, color: 'text-indigo-400 border-indigo-500/20 bg-indigo-500/5', count: stats.mlFilterPassedCount },
             { step: '4. Walk-Forward', desc: '5 Ferestre out-of-sample', icon: Sliders, color: 'text-purple-400 border-purple-500/20 bg-purple-500/5', count: stats.walkForwardPassedCount },
-            { step: '5. Monte Carlo', desc: '1000 simulări (VaR < 6.0%)', icon: ShieldCheck, color: 'text-cyan-400 border-cyan-500/20 bg-cyan-500/5', count: stats.monteCarloPassedCount },
+            { step: '5. Monte Carlo', desc: '1000 simulări (VaR < 11.0%)', icon: ShieldCheck, color: 'text-cyan-400 border-cyan-500/20 bg-cyan-500/5', count: stats.monteCarloPassedCount },
             { step: '6. Paper Trading', desc: 'Incubare 100-200 tranzacții', icon: Activity, color: 'text-orange-400 border-orange-500/20 bg-orange-500/5', count: stats.paperTradingCount },
             { step: '7. Live Trading', desc: 'Aprobate pentru executare', icon: Zap, color: 'text-emerald-400 border-emerald-500/20 bg-emerald-500/5', count: stats.liveReadyCount }
           ].map((s, idx) => {
@@ -456,30 +457,26 @@ export function AIStrategyLab() {
                   </div>
                 </div>
 
-                {/* ML Probability Breakdown (RF / XGBoost / LightGBM) */}
+                {/* ML Probability Breakdown (Random Forest Ensemble & Decision Trees) */}
                 <div className="bg-zinc-800/40 rounded-lg p-3 border border-white/5 mb-4">
                   <div className="flex justify-between items-center mb-1.5">
                     <span className="text-[11px] text-zinc-400 font-medium flex items-center gap-1">
                       <Cpu className="w-3.5 h-3.5 text-indigo-400" />
-                      Evaluare ML Ensemble Probabilități
+                      Evaluare ML Random Forest Ensemble
                     </span>
                     <span className="text-xs font-mono font-bold text-indigo-400">
-                      Medie ML: {strat.mlScores.ensembleScore}%
+                      Scor RF: {strat.mlScores.randomForestProb}%
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2 text-center text-[10px]">
+                  <div className="grid grid-cols-2 gap-2 text-center text-[10px]">
                     <div className="bg-black/30 p-1.5 rounded border border-white/5">
-                      <span className="text-zinc-500 block">Random Forest</span>
-                      <span className="font-mono font-semibold text-emerald-400">{strat.mlScores.randomForestProb}%</span>
+                      <span className="text-zinc-500 block">Arbori Decizionali Aprobați</span>
+                      <span className="font-mono font-semibold text-emerald-400">{strat.mlScores.treesApproved || Math.round((strat.mlScores.randomForestProb/100)*10)} / 10 Arbori</span>
                     </div>
                     <div className="bg-black/30 p-1.5 rounded border border-white/5">
-                      <span className="text-zinc-500 block">XGBoost</span>
-                      <span className="font-mono font-semibold text-blue-400">{strat.mlScores.xgboostProb}%</span>
-                    </div>
-                    <div className="bg-black/30 p-1.5 rounded border border-white/5">
-                      <span className="text-zinc-500 block">LightGBM</span>
-                      <span className="font-mono font-semibold text-purple-400">{strat.mlScores.lightgbmProb}%</span>
+                      <span className="text-zinc-500 block">Probabilitate Direcțională</span>
+                      <span className="font-mono font-semibold text-indigo-300">{strat.mlScores.randomForestProb}%</span>
                     </div>
                   </div>
                 </div>

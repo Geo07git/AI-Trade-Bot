@@ -1,9 +1,17 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useTradingStore } from '../store';
 import { requestNotificationPermission } from '../services/notifications';
 import { NotificationDiagnostic } from './NotificationDiagnostic';
+import { RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export function Settings() {
+  const [syncStatus, setSyncStatus] = useState<{ loading: boolean; message: string | null; error: boolean }>(
+    { loading: false, message: null, error: false }
+  );
+  const [binanceInspectorLoading, setBinanceInspectorLoading] = useState(false);
+  const [binanceInspectorSymbol, setBinanceInspectorSymbol] = useState('BTCUSDT');
+  const [binanceInspectorResult, setBinanceInspectorResult] = useState<any>(null);
+
   const { 
     dataInterval, 
     analysisInterval, 
@@ -16,6 +24,11 @@ export function Settings() {
     apiSecret,
     setApiKey,
     setApiSecret,
+    testnetApiKey,
+    testnetApiSecret,
+    setTestnetApiKey,
+    setTestnetApiSecret,
+    syncBinanceBalance,
     geminiApiKey,
     setGeminiApiKey,
     notificationProvider,
@@ -119,54 +132,255 @@ export function Settings() {
         </div>
 
         <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-6">
-          <h3 className="text-lg font-serif text-zinc-200 mb-4">Conectare Exchange (API Keys)</h3>
-          <p className="text-sm text-zinc-400 mb-4">Introdu cheile API pentru a permite botului să execute tranzacții. Pentru siguranță, dezactivează permisiunile de Withdraw (retragere).</p>
-          
+          <div className="flex justify-between items-start mb-4">
+            <div>
+              <h3 className="text-lg font-serif text-zinc-200">Conectare Exchange (Binance)</h3>
+              <p className="text-sm text-zinc-400 mt-1">
+                Configurează cheile API pentru Binance Testnet și Live. Pentru securitate maxima, dezactivează permisiunile de retragere (Withdrawals).
+              </p>
+            </div>
+          </div>
+
+          {/* Switch rapid pentru Mod Testnet */}
+          <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl mb-6 flex items-center justify-between">
+            <div className="pr-4">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-amber-200 text-sm">Mod Testnet (Binance Testnet)</span>
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded uppercase ${
+                  binanceMode === 'testnet' 
+                    ? 'bg-amber-500/30 text-amber-300 border border-amber-400/30 font-bold' 
+                    : 'bg-zinc-800 text-zinc-500 border border-zinc-700'
+                }`}>
+                  {binanceMode === 'testnet' ? 'ACTIV' : 'INACTIV'}
+                </span>
+              </div>
+              <p className="text-xs text-amber-300/80 mt-1">
+                Lansează oricând tranzacții în mediul securizat de test <strong>testnet.binance.vision</strong> fără niciun risc pentru fondurile reale.
+              </p>
+            </div>
+            <button 
+              type="button"
+              onClick={() => setBinanceMode(binanceMode === 'testnet' ? 'paper' : 'testnet')}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none ${
+                binanceMode === 'testnet' ? 'bg-amber-500' : 'bg-zinc-700'
+              }`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                binanceMode === 'testnet' ? 'translate-x-6' : 'translate-x-1'
+              }`} />
+            </button>
+          </div>
+
           <div className="mb-6">
-            <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-2 font-sans">Mod de Funcționare</label>
-            <div className="flex gap-2">
+            <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-2 font-sans">Mod Execuție Selectat</label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {(['paper', 'testnet', 'live'] as const).map(mode => (
                 <button
                   key={mode}
+                  type="button"
                   onClick={() => setBinanceMode(mode)}
-                  className={`flex-1 px-4 py-2 rounded-lg text-sm transition-colors border ${
+                  className={`px-3 py-2.5 rounded-lg text-xs font-medium transition-colors border text-center ${
                     binanceMode === mode 
-                    ? (mode === 'live' ? 'bg-red-500/10 text-red-400 border-red-500/30' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30') 
-                    : 'bg-zinc-800/40 text-zinc-300 border-white/5 hover:bg-white/5'
+                      ? (mode === 'live' 
+                          ? 'bg-red-500/20 text-red-300 border-red-500/40 font-semibold' 
+                          : mode === 'testnet' 
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 font-semibold' 
+                          : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 font-semibold') 
+                      : 'bg-zinc-800/40 text-zinc-400 border-white/5 hover:bg-white/5'
                   }`}
                 >
-                  {mode === 'paper' ? 'Paper Trading (Demo Local)' : mode === 'testnet' ? 'Binance Testnet' : 'Binance Real (LIVE)'}
+                  {mode === 'paper' ? 'Paper (Demo Local)' : mode === 'testnet' ? 'Binance Testnet' : 'Binance Real (LIVE)'}
                 </button>
               ))}
             </div>
             {binanceMode === 'live' && (
-              <p className="text-xs text-red-400 mt-2 bg-red-500/10 p-2 rounded border border-red-500/20">
-                Atenție: Ești în modul LIVE. Tranzacțiile vor fi efectuate cu fonduri reale pe Binance! Începe cu sume mici!
+              <p className="text-xs text-red-400 mt-3 bg-red-500/10 p-2.5 rounded-lg border border-red-500/20">
+                ⚠️ ATENȚIE: Modul LIVE este activat! Tranzacțiile vor fi trimise către API-ul Binance Real cu capitalul tău din cont.
+              </p>
+            )}
+            {binanceMode === 'testnet' && (
+              <p className="text-xs text-amber-300 mt-3 bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/20">
+                🟡 MOD TESTNET ACTIV: Ordinul va fi procesat pe Binance Spot Testnet (testnet.binance.vision).
               </p>
             )}
           </div>
 
-          <div className="space-y-4">
+          {/* Câmpuri Binance Testnet */}
+          <div className="p-4 rounded-xl bg-amber-500/5 border border-amber-500/15 mb-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-amber-300 uppercase tracking-wider font-mono">Binance Testnet Credentials</span>
+              <a 
+                href="https://testnet.binance.vision" 
+                target="_blank" 
+                rel="noreferrer" 
+                className="text-[11px] text-amber-400 hover:underline"
+              >
+                Obține Chei Testnet ↗
+              </a>
+            </div>
+
             <div>
-              <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-1 font-sans">API Key</label>
+              <label className="block text-[10px] uppercase tracking-widest text-zinc-400 mb-1 font-sans">Testnet API Key</label>
+              <input 
+                type="text" 
+                value={testnetApiKey}
+                onChange={(e) => setTestnetApiKey(e.target.value)}
+                placeholder="Ex: 62a8f9b2c3d4..." 
+                className="w-full bg-zinc-800/60 border border-amber-500/20 rounded-lg px-4 py-2 text-zinc-100 focus:outline-none focus:border-amber-500/50 font-mono text-sm" 
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-widest text-zinc-400 mb-1 font-sans">Testnet Secret Key</label>
+              <input 
+                type="password" 
+                value={testnetApiSecret}
+                onChange={(e) => setTestnetApiSecret(e.target.value)}
+                placeholder="Ex: 98f7e6d5c4b3..." 
+                className="w-full bg-zinc-800/60 border border-amber-500/20 rounded-lg px-4 py-2 text-zinc-100 focus:outline-none focus:border-amber-500/50 font-mono text-sm" 
+              />
+            </div>
+          </div>
+
+          {/* Câmpuri Binance Live */}
+          <div className="p-4 rounded-xl bg-zinc-800/30 border border-white/5 space-y-4">
+            <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono block">Binance Live (Real) Credentials</span>
+            <div>
+              <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-1 font-sans">Live Binance API Key</label>
               <input 
                 type="text" 
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Introdu API Key..." 
+                placeholder="Introdu Live API Key..." 
                 className="w-full bg-zinc-800/40 border border-white/5 rounded-lg px-4 py-2 text-zinc-100 focus:outline-none focus:border-white/20 font-mono text-sm" 
               />
             </div>
             <div>
-              <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-1 font-sans">API Secret</label>
+              <label className="block text-[10px] uppercase tracking-widest text-zinc-500 mb-1 font-sans">Live Binance Secret Key</label>
               <input 
                 type="password" 
                 value={apiSecret}
                 onChange={(e) => setApiSecret(e.target.value)}
-                placeholder="Introdu API Secret..." 
+                placeholder="Introdu Live API Secret..." 
                 className="w-full bg-zinc-800/40 border border-white/5 rounded-lg px-4 py-2 text-zinc-100 focus:outline-none focus:border-white/20 font-mono text-sm" 
               />
             </div>
+          </div>
+
+          {/* Test & Sync Balance Button */}
+          <div className="mt-6 pt-4 border-t border-white/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <button
+              type="button"
+              disabled={syncStatus.loading || binanceMode === 'paper'}
+              onClick={async () => {
+                setSyncStatus({ loading: true, message: 'Se testează conexiunea și se descarcă balanța...', error: false });
+                const res = await syncBinanceBalance();
+                if (res && res.success) {
+                  setSyncStatus({ 
+                    loading: false, 
+                    message: `Sincronizat cu succes! Balanță găsită: $${res.balance?.toFixed(2) || '0.00'} USDT`, 
+                    error: false 
+                  });
+                } else {
+                  setSyncStatus({ 
+                    loading: false, 
+                    message: `Eroare conexiune: ${res?.error || 'Cheile API sunt invalide sau respinse de Binance.'}`, 
+                    error: true 
+                  });
+                }
+              }}
+              className="px-4 py-2 bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 font-medium rounded-lg text-xs transition-colors flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncStatus.loading ? 'animate-spin' : ''}`} />
+              <span>Sincronizează Balanța din {binanceMode === 'testnet' ? 'Testnet' : binanceMode === 'live' ? 'Binance Live' : 'Exchange'}</span>
+            </button>
+
+            {syncStatus.message && (
+              <div className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-2 ${
+                syncStatus.error 
+                  ? 'bg-rose-500/10 text-rose-300 border border-rose-500/20' 
+                  : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
+              }`}>
+                {syncStatus.error ? <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" /> : <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />}
+                <span>{syncStatus.message}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Binance Service Inspector */}
+          <div className="mt-6 pt-4 border-t border-white/5 bg-zinc-950/50 rounded-xl p-4 border border-white/5">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2 flex items-center gap-2">
+              <RefreshCw className="w-3.5 h-3.5" /> Inspector BinanceService.ts (Live Test & Interogare Directă)
+            </h4>
+            <p className="text-xs text-zinc-400 mb-3">
+              Poți apela serviciul dedicat <code className="text-amber-300 font-mono text-[11px]">server/services/BinanceService.ts</code> direct din browser sau din cod pentru a interoga contul și tranzacțiile tale.
+            </p>
+
+            <div className="flex flex-wrap items-center gap-3 mb-3">
+              <button
+                type="button"
+                disabled={binanceInspectorLoading || binanceMode === 'paper'}
+                onClick={async () => {
+                  setBinanceInspectorLoading(true);
+                  try {
+                    const res = await fetch('/api/binance/account');
+                    const data = await res.json();
+                    setBinanceInspectorResult(data);
+                  } catch (err: any) {
+                    setBinanceInspectorResult({ error: err?.message || 'Eroare conectare' });
+                  } finally {
+                    setBinanceInspectorLoading(false);
+                  }
+                }}
+                className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-mono border border-white/10 transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                1. /api/binance/account (getAccountInfo)
+              </button>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={binanceInspectorSymbol}
+                  onChange={(e) => setBinanceInspectorSymbol(e.target.value.toUpperCase())}
+                  placeholder="BTCUSDT"
+                  className="w-24 bg-zinc-900 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  disabled={binanceInspectorLoading || binanceMode === 'paper'}
+                  onClick={async () => {
+                    setBinanceInspectorLoading(true);
+                    try {
+                      const res = await fetch(`/api/binance/trades?symbol=${binanceInspectorSymbol}`);
+                      const data = await res.json();
+                      setBinanceInspectorResult(data);
+                    } catch (err: any) {
+                      setBinanceInspectorResult({ error: err?.message || 'Eroare conectare' });
+                    } finally {
+                      setBinanceInspectorLoading(false);
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-mono border border-white/10 transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  2. /api/binance/trades (getMyTrades)
+                </button>
+              </div>
+            </div>
+
+            {binanceInspectorLoading && (
+              <p className="text-xs text-amber-400 font-mono animate-pulse">Se interoghează BinanceService.ts...</p>
+            )}
+
+            {binanceInspectorResult && !binanceInspectorLoading && (
+              <div className="mt-2 bg-zinc-900 border border-white/5 rounded-lg p-3 text-xs font-mono overflow-x-auto max-h-60">
+                <div className="flex justify-between items-center mb-1 text-[10px] text-zinc-500 uppercase">
+                  <span>Răspuns Binance API:</span>
+                  <button type="button" onClick={() => setBinanceInspectorResult(null)} className="text-zinc-400 hover:text-white">Închide</button>
+                </div>
+                <pre className="text-amber-300/90 text-[11px] whitespace-pre-wrap">
+                  {JSON.stringify(binanceInspectorResult, null, 2)}
+                </pre>
+              </div>
+            )}
           </div>
         </div>
 
