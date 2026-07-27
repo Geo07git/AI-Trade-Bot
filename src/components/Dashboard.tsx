@@ -38,7 +38,7 @@ export function Dashboard() {
 
   // State for Quick Trade Widget
   const [tradeSymbol, setTradeSymbol] = useState('BTCUSDT');
-  const [tradeAmountUsdt, setTradeAmountUsdt] = useState<number>(50);
+  const [tradeAmountUsdt, setTradeAmountUsdt] = useState<number>(10);
   const [tradeMessage, setTradeMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -422,25 +422,32 @@ export function Dashboard() {
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1 font-mono">Suma în USDT</label>
+                <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1 font-mono flex items-center justify-between">
+                  <span>Suma în USDT (Custom sau Butoane)</span>
+                  <span className="text-zinc-400 font-sans normal-case text-[10px]">Min: $1 USDT</span>
+                </label>
                 <div className="flex items-center gap-1.5">
-                  <input
-                    type="number"
-                    min={5}
-                    step={10}
-                    value={tradeAmountUsdt}
-                    onChange={(e) => setTradeAmountUsdt(Number(e.target.value))}
-                    className="w-full bg-zinc-800 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-amber-500/50"
-                  />
+                  <div className="relative flex-1">
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-mono">$</span>
+                    <input
+                      type="number"
+                      min={1}
+                      step="any"
+                      value={tradeAmountUsdt || ''}
+                      onChange={(e) => setTradeAmountUsdt(e.target.value === '' ? 0 : Number(e.target.value))}
+                      placeholder="Suma custom..."
+                      className="w-full bg-zinc-800 border border-white/10 rounded-lg pl-6 pr-2 py-2 text-xs font-mono text-white focus:outline-none focus:border-amber-500/50"
+                    />
+                  </div>
                   <div className="flex gap-1 shrink-0">
-                    {[20, 50, 100].map(amt => (
+                    {[10, 20, 50, 100].map(amt => (
                       <button
                         key={amt}
                         type="button"
                         onClick={() => setTradeAmountUsdt(amt)}
                         className={cn(
                           "px-2 py-1.5 rounded text-[10px] font-mono border transition-colors",
-                          tradeAmountUsdt === amt ? "bg-amber-500/20 text-amber-300 border-amber-500/40" : "bg-zinc-800 text-zinc-400 border-white/5 hover:text-white"
+                          tradeAmountUsdt === amt ? "bg-amber-500/20 text-amber-300 border-amber-500/40 font-semibold" : "bg-zinc-800 text-zinc-400 border-white/5 hover:text-white"
                         )}
                       >
                         ${amt}

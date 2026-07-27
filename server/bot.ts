@@ -489,11 +489,11 @@ class ServerBotEngine {
           this.state.autoTradingActive = true;
         }
 
-        // Auto-adjust paper trading balance if empty or legacy mismatch
-        if (this.state.binanceMode === 'paper') {
+        // Auto-adjust paper/testnet trading balance if empty or negligible
+        if (this.state.binanceMode === 'paper' || this.state.binanceMode === 'testnet') {
           if (!this.state.balance || this.state.balance < 10) {
-            this.state.balance = 10000;
-            this.state.initialBalance = 10000;
+            this.state.balance = 300;
+            this.state.initialBalance = 300;
             this.state.circuitBreakerTriggered = false;
             this.state.circuitBreakerReason = null;
           }
@@ -643,8 +643,8 @@ class ServerBotEngine {
       this.state.circuitBreakerReason = null;
       this.state.autoTradingActive = true;
       if (newConfig.binanceMode === 'paper' && this.state.balance < 10) {
-        this.state.balance = 10000;
-        this.state.initialBalance = 10000;
+        this.state.balance = 300;
+        this.state.initialBalance = 300;
       } else {
         this.state.initialBalance = this.calculateEquity();
       }
@@ -692,6 +692,30 @@ class ServerBotEngine {
           const lockedUsdt = parseFloat(usdtAsset.locked) || 0;
           const totalUsdt = freeUsdt + lockedUsdt;
 
+          if (mode === 'testnet' && freeUsdt < 10) {
+            // Testnet account on Binance has negligible funds (< $10 USDT, e.g. 0.009 USDT)
+            const fallbackBalance = (this.state.balance && this.state.balance >= 10) 
+              ? this.state.balance 
+              : (this.state.initialBalance && this.state.initialBalance >= 10 ? this.state.initialBalance : 300);
+
+            this.state.balance = fallbackBalance;
+            if (!this.state.initialBalance || this.state.initialBalance < 10) {
+              this.state.initialBalance = fallbackBalance;
+            }
+            if (this.state.circuitBreakerTriggered) {
+              this.state.circuitBreakerTriggered = false;
+              this.state.circuitBreakerReason = null;
+              this.state.autoTradingActive = true;
+            }
+
+            this.addLog(
+              `[BINANCE TESTNET] Conexiune API reuşită! Contul de pe testnet.binance.vision are $${freeUsdt.toFixed(3)} USDT. A fost stabilită o balanţă de lucru de $${fallbackBalance.toFixed(2)} USDT pentru execuţie. Poţi re-încărca Faucet-ul oficial pe testnet.binance.vision sau folosi "Adaugă Fonduri".`,
+              'info'
+            );
+            this.savePersistedState();
+            return { success: true, balance: fallbackBalance, total: fallbackBalance, lowTestnetBalance: true };
+          }
+
           this.state.balance = freeUsdt;
           // Re-baseline initial balance to total account value on sync so circuit breaker measures real trading PnL
           this.state.initialBalance = totalUsdt > 0 ? totalUsdt : (freeUsdt || 100);
@@ -728,6 +752,15 @@ class ServerBotEngine {
     this.state.circuitBreakerTriggered = false;
     this.state.circuitBreakerReason = null;
     this.addLog(`Portofoliu resetat la $${newBalance} pe server.`, 'warning');
+    this.savePersistedState();
+  }
+
+  public addFunds(addedAmount: number) {
+    if (isNaN(addedAmount) || addedAmount <= 0) return;
+    this.state.balance = (this.state.balance || 0) + addedAmount;
+    this.state.initialBalance = (this.state.initialBalance || 0) + addedAmount;
+    this.addLog(`➕ Depunere/Adăugare fonduri: +$${addedAmount.toFixed(2)} USDT adăugați în balanță. Noul sold: $${this.state.balance.toFixed(2)} USDT.`, 'info');
+    this.sendNotification(`💰 **[Adăugare Fonduri]**\nS-au adăugat $${addedAmount.toFixed(2)} USDT în balanța activă.\nNoul Sold: $${this.state.balance.toFixed(2)} USDT`);
     this.savePersistedState();
   }
 
@@ -981,10 +1014,11 @@ class ServerBotEngine {
       case '/reset':
       case '/resetare':
       case '/reporneste':
-        this.resetPortfolio(10000);
+        const targetResetAmt = this.state.initialBalance || 300;
+        this.resetPortfolio(targetResetAmt);
         this.state.autoTradingActive = true;
         this.savePersistedState();
-        reply = '🔄 <b>Portofoliu & Bot Resetate cu Succes!</b>\nCapitalul virtual este de $10,000 USDT, iar auto-tradingul rulează activ.';
+        reply = `🔄 <b>Portofoliu & Bot Resetate cu Succes!</b>\nCapitalul virtual este de $${targetResetAmt} USDT, iar auto-tradingul rulează activ.`;
         break;
 
       case '/buy':
@@ -1097,13 +1131,22 @@ class ServerBotEngine {
         });
 
         const filters = await getSymbolFilters(client, symbol);
-        const formattedQtyStr = formatQuantityByStepSize(amount, filters.stepSize);
-        const formattedQtyNum = parseFloat(formattedQtyStr);
 
-        const estimatedValue = formattedQtyNum * price;
-        if (formattedQtyNum < filters.minQty) {
-          this.addLog(`[SAFETY Binance] Ordin ${action} ${symbol} anulat: Cantitatea ${formattedQtyStr} este sub minQty (${filters.minQty})`, 'warning');
-          return;
+        // Pre-check real Binance balance to prevent -2010 insufficient balance errors
+        let realFreeUSDT: number | null = null;
+        let realFreeAsset: number | null = null;
+        try {
+          const accInfo = await client.accountInfo();
+          if (accInfo && Array.isArray(accInfo.balances)) {
+            const usdtB = accInfo.balances.find((b: any) => b.asset === 'USDT');
+            if (usdtB) realFreeUSDT = parseFloat(usdtB.free) || 0;
+
+            const assetName = symbol.replace(/USDT$/i, '');
+            const assetB = accInfo.balances.find((b: any) => b.asset === assetName);
+            if (assetB) realFreeAsset = parseFloat(assetB.free) || 0;
+          }
+        } catch (e) {
+          console.warn('[Binance Account Pre-Check Warning]', e);
         }
 
         const orderParams: any = {
@@ -1113,27 +1156,74 @@ class ServerBotEngine {
         };
 
         if (action === 'BUY') {
-          const costInUSDT = price * amount;
-          if (costInUSDT >= filters.minNotional) {
-            orderParams.quoteOrderQty = Math.max(filters.minNotional, parseFloat(costInUSDT.toFixed(2))).toString();
+          const requestedCost = price * amount;
+          const availableUSDT = (realFreeUSDT !== null && (this.state.binanceMode !== 'testnet' || realFreeUSDT >= filters.minNotional))
+            ? realFreeUSDT
+            : this.state.balance;
+
+          if (availableUSDT < filters.minNotional) {
+            this.addLog(`[BINANCE ${this.state.binanceMode.toUpperCase()}] Ordin CUMPĂRARE ${symbol} anulat: Balanță USDT disponibilă ($${availableUSDT.toFixed(2)}) sub minimul necesar de $${filters.minNotional} USDT.`, 'warning');
+            if (realFreeUSDT !== null && (this.state.binanceMode !== 'testnet' || realFreeUSDT >= filters.minNotional)) {
+              this.state.balance = realFreeUSDT;
+              this.savePersistedState();
+            }
+            return;
+          }
+
+          // Cap quote order size to available USDT (leaving 0.5% margin for fees/slippage)
+          const safeCostInUSDT = Math.min(requestedCost, availableUSDT * 0.995);
+          if (safeCostInUSDT >= filters.minNotional) {
+            orderParams.quoteOrderQty = safeCostInUSDT.toFixed(2);
           } else {
+            const formattedQtyStr = formatQuantityByStepSize(safeCostInUSDT / price, filters.stepSize);
             orderParams.quantity = formattedQtyStr;
           }
-        } else {
-          orderParams.quantity = formattedQtyStr;
+        } else { // SELL
+          const availableAsset = realFreeAsset !== null ? realFreeAsset : amount;
+          const qtyToSell = Math.min(amount, availableAsset);
+          const formattedSellQtyStr = formatQuantityByStepSize(qtyToSell, filters.stepSize);
+          const formattedSellQtyNum = parseFloat(formattedSellQtyStr);
+
+          if (formattedSellQtyNum < filters.minQty) {
+            this.addLog(`[BINANCE ${this.state.binanceMode.toUpperCase()}] Ordin VÂNZARE ${symbol} anulat: Cantitatea disponibilă (${formattedSellQtyStr}) este sub minimul de lot (${filters.minQty}).`, 'warning');
+            return;
+          }
+          orderParams.quantity = formattedSellQtyStr;
         }
 
         const order = await client.order(orderParams);
         
-        // If order successful, log execution
+        // If order successful, update real balance
         if (order && (order.status === 'FILLED' || order.status === 'NEW')) {
           console.log(`[Binance Executed] ${action} ${symbol} order filled successfully on ${this.state.binanceMode}`);
+          if (realFreeUSDT !== null) {
+            this.state.balance = realFreeUSDT;
+          }
         }
       } catch (err: any) {
         orderSuccess = false;
         console.error('Binance Order Error:', err);
-        this.addLog(`Eroare Binance (${this.state.binanceMode}): ${err.message}`, 'warning', this.calculateEquity());
-        this.sendNotification(`❌ **Eroare Binance [${this.state.binanceMode}]**\nActiv: ${symbol}\nAcțiune: ${action}\nEroare: ${err.message}`);
+
+        const errMsg = err?.message || String(err);
+        const isInsufficient = errMsg.includes('insufficient balance') || errMsg.includes('-2010') || errMsg.includes('2010');
+
+        if (isInsufficient) {
+          if (this.state.binanceMode === 'testnet') {
+            this.addLog(
+              `[BINANCE TESTNET] Ordinul transmis pe testnet.binance.vision a fost respins (Eroare -2010: Balanță USDT insuficientă pe serverul Binance Testnet). Sfat: Re-alimentează contul direct pe https://testnet.binance.vision/ cu Faucet sau folosește modul Paper Trading.`,
+              'warning',
+              this.calculateEquity()
+            );
+          } else {
+            this.addLog(`[BINANCE LIVE] Balanță insuficientă în contul Binance pentru ordinul ${action} ${symbol}. Re-sincronizăm balanța...`, 'warning', this.calculateEquity());
+            this.sendNotification(`⚠️ **[Binance Live] Balanță insuficientă**\nContul Binance nu dispune de fonduri suficiente pentru ${action} ${symbol}. S-a efectuat re-sincronizarea.`);
+            // Sync real balance immediately
+            this.syncBinanceBalance().catch(() => {});
+          }
+        } else {
+          this.addLog(`Eroare Binance (${this.state.binanceMode}): ${errMsg}`, 'warning', this.calculateEquity());
+          this.sendNotification(`❌ **Eroare Binance [${this.state.binanceMode}]**\nActiv: ${symbol}\nAcțiune: ${action}\nEroare: ${errMsg}`);
+        }
       }
     }
 
@@ -1443,9 +1533,10 @@ class ServerBotEngine {
 
     // Auto-replenish paper trading capital if empty and no positions held
     if (this.state.binanceMode === 'paper' && this.state.balance < 10 && this.state.positions.length === 0) {
-      this.state.balance = 10000;
-      this.state.initialBalance = 10000;
-      this.addLog('[PAPER TRADING] Capitalul virtual a fost reîncărcat automat la $10,000 USDT pentru continuitate.', 'info', 10000);
+      const replenishAmt = this.state.initialBalance || 300;
+      this.state.balance = replenishAmt;
+      this.state.initialBalance = replenishAmt;
+      this.addLog(`[PAPER TRADING] Capitalul virtual a fost reîncărcat automat la $${replenishAmt} USDT pentru continuitate.`, 'info', replenishAmt);
       this.savePersistedState();
     }
 

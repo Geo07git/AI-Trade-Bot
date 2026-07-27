@@ -23,23 +23,23 @@ export function Strategies() {
   const [progress, setProgress] = useState(0);
 
   // Model parameters
-  const [maxDepth, setMaxDepth] = useState(6);
-  const [learningRate, setLearningRate] = useState(0.05);
+  const [maxDepth, setMaxDepth] = useState(9);
+  const [learningRate, setLearningRate] = useState(0.02);
   const [numLeaves, setNumLeaves] = useState(31);
   const [boostingType, setBoostingType] = useState('gbdt');
-  const [nEstimators, setNEstimators] = useState(100);
+  const [nEstimators, setNEstimators] = useState(250);
   const [criterion, setCriterion] = useState('gini');
 
   // Risk Management
   const [stopLoss, setStopLoss] = useState(2.0);
   const [takeProfit, setTakeProfit] = useState(4.0);
-  const [confidenceThreshold, setConfidenceThreshold] = useState(40);
+  const [confidenceThreshold, setConfidenceThreshold] = useState(25);
   const [riskPerTrade, setRiskPerTrade] = useState(1.0);
 
   // Real analysis state output
   const [analysisResult, setAnalysisResult] = useState<StrategyResult | null>(null);
 
-  const { watchlist, updateSignal, executeTrade, addLog, balance } = useTradingStore();
+  const { watchlist, updateSignal, executeTrade, addLog, balance, positions } = useTradingStore();
 
   // Set default symbol from watchlist if available
   useEffect(() => {
@@ -88,13 +88,15 @@ export function Strategies() {
         executeTrade(result.symbol, 'BUY', currentPrice, amountToBuy);
         sendWebPush(`Semnal AI Calculat: CUMPĂRĂ`, `Activ: ${result.symbol}\nPreț: $${currentPrice}\nRSI: ${result.indicators.rsi}\nProbabilitate: ${result.probability}%`);
       } else if (result.signal === 'SELL' && result.probability >= confidenceThreshold) {
-        const riskAmount = balance * (riskPerTrade / 100);
-        const riskPerCoin = currentPrice * (stopLoss / 100);
-        // Simplified for shorting logic which typically requires margin, here we simulate holding the coin or equivalent
-        let amountToSell = parseFloat((riskAmount / riskPerCoin).toFixed(6));
-
-        executeTrade(result.symbol, 'SELL', currentPrice, amountToSell);
-        sendWebPush(`Semnal AI Calculat: VÂNZARE`, `Activ: ${result.symbol}\nPreț: $${currentPrice}\nRSI: ${result.indicators.rsi}\nProbabilitate: ${result.probability}%`);
+        const heldPos = positions.find(p => p.symbol === result.symbol);
+        if (heldPos && heldPos.amount > 0) {
+          const amountToSell = heldPos.amount;
+          executeTrade(result.symbol, 'SELL', currentPrice, amountToSell);
+          sendWebPush(`Semnal AI Calculat: VÂNZARE`, `Activ: ${result.symbol}\nPreț: $${currentPrice}\nCantitate vândută: ${amountToSell}\nProbabilitate: ${result.probability}%`);
+        } else {
+          addLog(`[ML Strategy] Semnal VÂNZARE generat pentru ${result.symbol} (${result.probability}% probabilitate), dar nu deții nicio poziție deschisă în portofoliu. Ordinul de vânzare spot nu s-a transmis.`, 'warning');
+          sendWebPush(`Semnal AI Calculat: VÂNZARE (Fără Poziție)`, `Activ: ${result.symbol}\nPreț: $${currentPrice}\nNotă: Nu deții acest activ în portofoliu.`);
+        }
       }
     } catch (err) {
       console.error('Eroare la calculul real al strategiei:', err);

@@ -75,6 +75,15 @@ async function startServer() {
     res.json({ success: true, state: botEngine.state });
   });
 
+  app.post('/api/bot/add-funds', (req, res) => {
+    const { amount } = req.body;
+    const added = parseFloat(amount);
+    if (!isNaN(added) && added > 0) {
+      botEngine.addFunds(added);
+    }
+    res.json({ success: true, state: botEngine.state, calculatedEquity: botEngine.calculateEquity() });
+  });
+
   app.post('/api/bot/clear-logs', (req, res) => {
     botEngine.clearLogs();
     res.json({ success: true, state: botEngine.state });

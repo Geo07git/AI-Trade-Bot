@@ -46,6 +46,7 @@ interface TradingStore {
   };
   
   setBalance: (amount: number) => void;
+  addFunds: (amount: number) => void;
   addWatchlist: (symbol: string) => void;
   removeWatchlist: (symbol: string) => void;
   updatePrice: (symbol: string, price: number) => void;
@@ -140,6 +141,42 @@ export const useTradingStore = create<TradingStore>()(
       body: JSON.stringify({ balance: amount })
     }).catch(() => {});
   },
+
+  addFunds: (amount) => {
+    if (isNaN(amount) || amount <= 0) return;
+    fetch('/api/bot/add-funds', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.state) {
+          set(state => ({
+            ...state,
+            balance: data.state.balance ?? state.balance,
+            initialBalance: data.state.initialBalance ?? state.initialBalance,
+            logs: data.state.logs ?? state.logs
+          }));
+        }
+      })
+      .catch(err => console.error('Error adding funds on server:', err));
+
+    set(state => ({
+      balance: state.balance + amount,
+      initialBalance: state.initialBalance + amount,
+      logs: [
+        {
+          id: String(Date.now()),
+          timestamp: new Date().toLocaleTimeString(),
+          message: `➕ Depunere/Adăugare fonduri: +$${amount.toFixed(2)} USDT adăugați în balanță.`,
+          type: 'info',
+          equity: state.balance + amount
+        },
+        ...state.logs
+      ]
+    }));
+  },
   
   addWatchlist: (symbol) => set((state) => {
     if (state.watchlist.find(w => w.symbol === symbol)) return state;
@@ -186,10 +223,25 @@ export const useTradingStore = create<TradingStore>()(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ symbol, action, price, amount })
-    }).catch(() => {});
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.state) {
+          set((state) => ({
+            ...state,
+            balance: data.state.balance ?? state.balance,
+            positions: data.state.positions ?? state.positions,
+            logs: data.state.logs ?? state.logs,
+            circuitBreakerTriggered: data.state.circuitBreakerTriggered ?? state.circuitBreakerTriggered,
+            circuitBreakerReason: data.state.circuitBreakerReason ?? state.circuitBreakerReason,
+            autoTradingActive: data.state.autoTradingActive ?? state.autoTradingActive
+          }));
+        }
+      })
+      .catch((err) => console.error('Error executing trade on server:', err));
 
     set((state) => {
-      // Simplified paper trading execution
+      // Simplified paper trading optimistic UI update
       const cost = price * amount;
       if (action === 'BUY' && state.balance >= cost) {
         const existing = state.positions.find(p => p.symbol === symbol);

@@ -11,7 +11,7 @@ function cn(...inputs: (string | undefined | null | false)[]) {
 }
 
 export function Backtesting() {
-  const { watchlist } = useTradingStore();
+  const { watchlist, balance } = useTradingStore();
   const [selectedSymbol, setSelectedSymbol] = useState(watchlist[0]?.symbol || 'BTCUSDT');
   const [stopLoss, setStopLoss] = useState(1.8);
   const [takeProfit, setTakeProfit] = useState(3.8);
@@ -79,7 +79,7 @@ export function Backtesting() {
       setAnalysis(result);
 
       // Generate realistic equity curve from real strategy backtest results
-      const baseEquity = 10000;
+      const baseEquity = balance || 300;
       let currentEquity = baseEquity;
       const chartData = [];
       const totalSteps = 30; // 30 visual points

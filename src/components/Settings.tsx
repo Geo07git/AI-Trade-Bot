@@ -13,6 +13,9 @@ export function Settings() {
   const [binanceInspectorResult, setBinanceInspectorResult] = useState<any>(null);
   const [telegramGuideLoading, setTelegramGuideLoading] = useState(false);
   const [telegramGuideStatus, setTelegramGuideStatus] = useState<{ message: string; error: boolean } | null>(null);
+  const [customPaperBalance, setCustomPaperBalance] = useState('300');
+  const [addTopupAmount, setAddTopupAmount] = useState('50');
+  const [topupSuccessMsg, setTopupSuccessMsg] = useState<string | null>(null);
 
   const { 
     dataInterval, 
@@ -22,6 +25,8 @@ export function Settings() {
     autoTradingActive, 
     setAutoTradingActive, 
     setBalance,
+    addFunds,
+    balance,
     apiKey,
     apiSecret,
     setApiKey,
@@ -201,9 +206,20 @@ export function Settings() {
               </p>
             )}
             {binanceMode === 'testnet' && (
-              <p className="text-xs text-amber-300 mt-3 bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/20">
-                🟡 MOD TESTNET ACTIV: Ordinul va fi procesat pe Binance Spot Testnet (testnet.binance.vision).
-              </p>
+              <div className="mt-3 bg-amber-500/10 p-3 rounded-xl border border-amber-500/20 text-xs text-amber-200 space-y-1.5">
+                <div className="font-semibold text-amber-300 flex items-center gap-1.5">
+                  <span>🟡 MOD TESTNET ACTIV (testnet.binance.vision)</span>
+                </div>
+                <p className="text-zinc-300 text-[11px] leading-relaxed">
+                  Dacă balanța citită din API este <strong>0.009 USDT</strong>: Conturile de testnet.binance.vision au adesea soldul consumat. Pentru a re-încărca 10.000 USDT de test pe serverul oficial Binance:
+                  <br />
+                  1. Intră pe <a href="https://testnet.binance.vision" target="_blank" rel="noreferrer" className="text-amber-400 underline font-semibold">testnet.binance.vision ↗</a> și autentifică-te cu GitHub.
+                  <br />
+                  2. Apasă <strong>Generate API Key</strong> sau <strong>Reset / Faucet Spot Assets</strong>.
+                  <br />
+                  3. În aplicație, am activat protecția de sold minim ($300 USDT) pentru ca testarea să nu fie blocată.
+                </p>
+              </div>
             )}
           </div>
 
@@ -569,16 +585,92 @@ export function Settings() {
           </div>
         </div>
 
+        {/* Top-Up / Adăugare Fonduri Suplimentare */}
+        <div className="bg-zinc-900/50 border border-emerald-500/20 rounded-2xl p-6 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h3 className="text-lg font-serif text-zinc-200 mb-1 flex items-center gap-2">
+                <span>➕ Adăugare Fonduri în Sesiunea Curentă</span>
+                <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono border border-emerald-500/20">Fără Resetare</span>
+              </h3>
+              <p className="text-sm text-zinc-400">
+                Adaugă lichidități suplimentare direct în balanța activă fără a închide pozițiile deschise sau a șterge istoricul.
+              </p>
+            </div>
+            <div className="text-right bg-zinc-950/60 px-3 py-1.5 rounded-lg border border-white/5">
+              <span className="text-[10px] uppercase text-zinc-500 block">Balanță Curentă</span>
+              <span className="text-sm font-mono font-bold text-emerald-400">${balance.toFixed(2)} USDT</span>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-zinc-400">Adăugare rapidă:</span>
+              {[10, 25, 50, 100, 200, 500].map(amt => (
+                <button
+                  key={amt}
+                  onClick={() => {
+                    addFunds(amt);
+                    setTopupSuccessMsg(`+$${amt} USDT adăugați cu succes!`);
+                    setTimeout(() => setTopupSuccessMsg(null), 4000);
+                  }}
+                  className="px-3 py-1 bg-zinc-800/80 hover:bg-emerald-500/20 text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 rounded-lg text-xs font-mono transition-colors"
+                >
+                  +${amt} USDT
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 pt-1 max-w-md">
+              <div className="relative flex-1">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-sm font-mono">$</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="100000"
+                  value={addTopupAmount}
+                  onChange={(e) => setAddTopupAmount(e.target.value)}
+                  placeholder="Suma custom (ex: 75)..."
+                  className="w-full bg-zinc-950/80 border border-white/10 rounded-lg pl-7 pr-14 py-2 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500/50 font-mono"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-mono">USDT</span>
+              </div>
+              <button
+                onClick={() => {
+                  const amt = parseFloat(addTopupAmount);
+                  if (isNaN(amt) || amt <= 0) return;
+                  addFunds(amt);
+                  setTopupSuccessMsg(`+$${amt.toFixed(2)} USDT adăugați cu succes în balanță!`);
+                  setTimeout(() => setTopupSuccessMsg(null), 4000);
+                }}
+                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold rounded-lg text-xs transition-colors whitespace-nowrap shadow-lg shadow-emerald-500/10"
+              >
+                Adaugă +${parseFloat(addTopupAmount) || 0} USDT
+              </button>
+            </div>
+
+            {topupSuccessMsg && (
+              <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 p-2.5 rounded-lg animate-fadeIn">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{topupSuccessMsg}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Paper Trading Setup (Resetare) */}
         <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-6">
-          <h3 className="text-lg font-serif text-zinc-200 mb-4">Paper Trading Setup</h3>
-          <p className="text-sm text-zinc-400 mb-4">Sistemul rulează 100% offline pentru execuție (fără API-uri de brokeri reali). Setările de mai jos definesc capitalul tău virtual de test.</p>
+          <h3 className="text-lg font-serif text-zinc-200 mb-2">Resetare Totală Capital & Sesiune (Reinițializare)</h3>
+          <p className="text-sm text-zinc-400 mb-4">Setează un capital inițial curat (ex: $100, $200, $300 sau $500 USDT). Această acțiune va închide pozițiile simulative curente și va reseta istoricul.</p>
+          
           <div className="space-y-4">
-            <div className="flex items-center gap-3 flex-wrap">
-              {[100, 500, 1000, 10000].map(amt => (
+            <div className="flex items-center gap-2 flex-wrap">
+              {[100, 200, 300, 500, 1000].map(amt => (
                 <button 
                   key={amt}
                   onClick={async () => {
                     setBalance(amt);
+                    setCustomPaperBalance(String(amt));
                     try {
                       await fetch('/api/bot/reset', {
                         method: 'POST',
@@ -589,16 +681,52 @@ export function Settings() {
                       console.error('Reset error:', e);
                     }
                   }}
-                  className={`px-4 py-2 font-medium rounded-md transition-colors text-sm border ${
-                    amt === 100
-                    ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/20'
-                    : 'bg-zinc-800/40 hover:bg-zinc-800 text-zinc-300 border-white/5'
+                  className={`px-3.5 py-1.5 font-medium rounded-lg transition-colors text-xs border ${
+                    amt === 300
+                    ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30 font-semibold'
+                    : 'bg-zinc-800/60 hover:bg-zinc-800 text-zinc-300 border-white/10'
                   }`}>
-                  Resetare la ${amt} {amt === 100 ? '(Recomandat)' : ''}
+                  Setează $${amt} USDT {amt === 300 ? '(Recomandat)' : ''}
                 </button>
               ))}
             </div>
-            <p className="text-xs text-zinc-500">Toate pozițiile curente vor fi închise și soldul va fi reinițializat.</p>
+
+            <div className="flex items-center gap-2 pt-2 max-w-sm">
+              <div className="relative flex-1">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-sm font-mono">$</span>
+                <input
+                  type="number"
+                  min="10"
+                  max="100000"
+                  value={customPaperBalance}
+                  onChange={(e) => setCustomPaperBalance(e.target.value)}
+                  placeholder="Ex: 250"
+                  className="w-full bg-zinc-950/80 border border-white/10 rounded-lg pl-7 pr-12 py-2 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500/50 font-mono"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-mono">USDT</span>
+              </div>
+              <button
+                onClick={async () => {
+                  const amt = parseFloat(customPaperBalance);
+                  if (isNaN(amt) || amt < 1) return;
+                  setBalance(amt);
+                  try {
+                    await fetch('/api/bot/reset', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ balance: amt })
+                    });
+                  } catch (e) {
+                    console.error('Reset error:', e);
+                  }
+                }}
+                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-white/10 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+              >
+                Resetare Capital
+              </button>
+            </div>
+
+            <p className="text-xs text-zinc-500">Resetarea capitalului va închide pozițiile simulative curente și va aplica noul sold în serverul 24/7.</p>
           </div>
         </div>
 
