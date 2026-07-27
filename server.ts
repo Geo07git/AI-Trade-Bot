@@ -85,6 +85,12 @@ async function startServer() {
     res.json({ success: true, state: botEngine.state });
   });
 
+  app.post('/api/bot/send-telegram-guide', async (req, res) => {
+    const { chatId } = req.body || {};
+    const result = await botEngine.sendTelegramCommandGuide(chatId, true);
+    res.json(result);
+  });
+
   app.post('/api/bot/sync-binance', async (req, res) => {
     const result = await botEngine.syncBinanceBalance();
     res.json({ ...result, state: botEngine.state, calculatedEquity: botEngine.calculateEquity() });
@@ -103,8 +109,8 @@ async function startServer() {
   app.get('/api/binance/account', async (req, res) => {
     try {
       const mode = botEngine.state.binanceMode;
-      const apiKey = mode === 'testnet' ? (botEngine.state.testnetApiKey || botEngine.state.apiKey) : botEngine.state.apiKey;
-      const apiSecret = mode === 'testnet' ? (botEngine.state.testnetApiSecret || botEngine.state.apiSecret) : botEngine.state.apiSecret;
+      const apiKey = (mode === 'testnet' ? (botEngine.state.testnetApiKey || botEngine.state.apiKey) : botEngine.state.apiKey)?.trim();
+      const apiSecret = (mode === 'testnet' ? (botEngine.state.testnetApiSecret || botEngine.state.apiSecret) : botEngine.state.apiSecret)?.trim();
 
       if (!apiKey || !apiSecret) {
         return res.status(400).json({ success: false, error: 'Cheile API Binance nu sunt configurate în setări.' });
@@ -121,8 +127,8 @@ async function startServer() {
     try {
       const symbol = (req.query.symbol as string) || 'BTCUSDT';
       const mode = botEngine.state.binanceMode;
-      const apiKey = mode === 'testnet' ? (botEngine.state.testnetApiKey || botEngine.state.apiKey) : botEngine.state.apiKey;
-      const apiSecret = mode === 'testnet' ? (botEngine.state.testnetApiSecret || botEngine.state.apiSecret) : botEngine.state.apiSecret;
+      const apiKey = (mode === 'testnet' ? (botEngine.state.testnetApiKey || botEngine.state.apiKey) : botEngine.state.apiKey)?.trim();
+      const apiSecret = (mode === 'testnet' ? (botEngine.state.testnetApiSecret || botEngine.state.apiSecret) : botEngine.state.apiSecret)?.trim();
 
       if (!apiKey || !apiSecret) {
         return res.status(400).json({ success: false, error: 'Cheile API Binance nu sunt configurate în setări.' });
@@ -179,68 +185,199 @@ async function startServer() {
     }
   });
 
-  // Live Crypto & Binance News API Route
+  // Helper to strip HTML tags and decode HTML entities
+  function cleanNewsText(str: string): string {
+    if (!str) return '';
+    return str
+      .replace(/&#39;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/<[^>]*>?/gm, '')
+      .trim();
+  }
+
+  // In-memory cache for live news
+  let cachedNewsArticles: any[] = [];
+  let newsCacheTime = 0;
+
+  // Live Multi-Source Crypto & Binance News API Route
   app.get('/api/news', async (req, res) => {
     try {
-      const response = await fetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN', {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json'
+      const nowMs = Date.now();
+      // Serve cached news if less than 60 seconds old
+      if (cachedNewsArticles.length > 0 && nowMs - newsCacheTime < 60000) {
+        return res.json({ success: true, articles: cachedNewsArticles, cached: true });
+      }
+
+      const bullishKeywords = ['surge', 'rally', 'bull', 'soar', 'high', 'breakout', 'growth', 'gain', 'launch', 'partnership', 'approval', 'etf', 'buy', 'record', 'all-time', 'positive', 'upgrade', 'profit', 'soaring', 'rebound', 'inflow'];
+      const bearishKeywords = ['crash', 'drop', 'dump', 'bear', 'plunge', 'fall', 'decline', 'ban', 'lawsuit', 'sec', 'hack', 'exploit', 'liquidation', 'loss', 'risk', 'warning', 'sell', 'investigation', 'arrest', 'outflow'];
+      const possibleCoins = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT', 'NEAR', 'ATOM', 'PEPE', 'SHIB', 'SUI', 'APT'];
+
+      const rss2JsonUrls = [
+        { url: 'https://api.rss2json.com/v1/api.json?rss_url=https://cointelegraph.com/rss', source: 'Cointelegraph' },
+        { url: 'https://api.rss2json.com/v1/api.json?rss_url=https://www.coindesk.com/arc/outboundfeeds/rss/', source: 'CoinDesk' },
+        { url: 'https://api.rss2json.com/v1/api.json?rss_url=https://decrypt.co/feed', source: 'Decrypt' }
+      ];
+
+      const directXmlUrls = [
+        { url: 'https://cointelegraph.com/rss', source: 'Cointelegraph' },
+        { url: 'https://www.coindesk.com/arc/outboundfeeds/rss/', source: 'CoinDesk' },
+        { url: 'https://decrypt.co/feed', source: 'Decrypt' }
+      ];
+
+      let rawArticlesCollected: any[] = [];
+
+      // 1. Try fetching via JSON converters (fast & formatted)
+      const jsonPromises = rss2JsonUrls.map(async (src) => {
+        try {
+          const response = await fetch(src.url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+          });
+          if (!response.ok) return [];
+          const data = await response.json();
+          if (data.status === 'ok' && Array.isArray(data.items)) {
+            return data.items.map((item: any) => ({
+              title: item.title,
+              url: item.link,
+              source: src.source,
+              publishedAt: item.pubDate,
+              body: item.description || '',
+              imageurl: item.thumbnail || item.enclosure?.link || null
+            }));
+          }
+        } catch {
+          return [];
+        }
+        return [];
+      });
+
+      const jsonResults = await Promise.allSettled(jsonPromises);
+      jsonResults.forEach((r) => {
+        if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+          rawArticlesCollected.push(...r.value);
         }
       });
-      if (!response.ok) {
-        throw new Error(`Crypto news API returned status ${response.status}`);
-      }
-      const data = await response.json();
-      const rawArticles = data.Data || [];
-      if (!Array.isArray(rawArticles) || rawArticles.length === 0) {
-        throw new Error('No news articles returned');
+
+      // 2. Fallback to direct XML parsing if json converters returned few articles
+      if (rawArticlesCollected.length < 5) {
+        const xmlPromises = directXmlUrls.map(async (src) => {
+          try {
+            const response = await fetch(src.url, {
+              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+            });
+            if (!response.ok) return [];
+            const xml = await response.text();
+            const items: any[] = [];
+            const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+            let match;
+            while ((match = itemRegex.exec(xml)) !== null) {
+              const itemXml = match[1];
+              const titleMatch = /<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i.exec(itemXml);
+              const linkMatch = /<link>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/link>/i.exec(itemXml);
+              const pubDateMatch = /<pubDate>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/pubDate>/i.exec(itemXml);
+              const descMatch = /<description>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/i.exec(itemXml);
+              const mediaMatch = /<media:content[^>]+url=[\"']([^\"']+)[\"']/i.exec(itemXml) || 
+                                 /<enclosure[^>]+url=[\"']([^\"']+)[\"']/i.exec(itemXml) ||
+                                 /<media:thumbnail[^>]+url=[\"']([^\"']+)[\"']/i.exec(itemXml);
+
+              if (titleMatch) {
+                items.push({
+                  title: titleMatch[1],
+                  url: linkMatch ? linkMatch[1].trim() : '',
+                  source: src.source,
+                  publishedAt: pubDateMatch ? pubDateMatch[1].trim() : new Date().toISOString(),
+                  body: descMatch ? descMatch[1] : '',
+                  imageurl: mediaMatch ? mediaMatch[1] : null
+                });
+              }
+            }
+            return items;
+          } catch {
+            return [];
+          }
+        });
+
+        const xmlResults = await Promise.allSettled(xmlPromises);
+        xmlResults.forEach((r) => {
+          if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+            rawArticlesCollected.push(...r.value);
+          }
+        });
       }
 
-      const bullishKeywords = ['surge', 'rally', 'bull', 'soar', 'high', 'breakout', 'growth', 'gain', 'launch', 'partnership', 'approval', 'etf', 'buy', 'record', 'all-time', 'positive', 'upgrade'];
-      const bearishKeywords = ['crash', 'drop', 'dump', 'bear', 'plunge', 'fall', 'decline', 'ban', 'lawsuit', 'sec', 'hack', 'exploit', 'liquidation', 'loss', 'risk', 'warning', 'sell'];
+      // Deduplicate by title
+      const seenTitles = new Set<string>();
+      const uniqueArticles = rawArticlesCollected.filter((item) => {
+        const cleanT = cleanNewsText(item.title).toLowerCase();
+        if (!cleanT || seenTitles.has(cleanT)) return false;
+        seenTitles.add(cleanT);
+        return true;
+      });
 
-      const articles = rawArticles.slice(0, 20).map((item: any) => {
-        const textToAnalyze = `${item.title || ''} ${item.body || ''}`.toLowerCase();
-        
+      if (uniqueArticles.length === 0) {
+        throw new Error('No live articles retrieved');
+      }
+
+      const articles = uniqueArticles.slice(0, 30).map((item: any, idx: number) => {
+        const title = cleanNewsText(item.title);
+        const summary = cleanNewsText(item.body);
+        const textToAnalyze = `${title} ${summary}`.toLowerCase();
+
         let bullScore = 0;
         let bearScore = 0;
-        bullishKeywords.forEach(kw => { if (textToAnalyze.includes(kw)) bullScore++; });
-        bearishKeywords.forEach(kw => { if (textToAnalyze.includes(kw)) bearScore++; });
+        bullishKeywords.forEach((kw) => { if (textToAnalyze.includes(kw)) bullScore++; });
+        bearishKeywords.forEach((kw) => { if (textToAnalyze.includes(kw)) bearScore++; });
 
         let sentiment: 'bullish' | 'bearish' | 'neutral' = 'neutral';
         if (bullScore > bearScore) sentiment = 'bullish';
         else if (bearScore > bullScore) sentiment = 'bearish';
 
-        // Extract coins/symbols
-        const possibleCoins = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT', 'NEAR', 'ATOM', 'PEPE', 'SHIB', 'SUI', 'APT'];
         const matchedSymbols: string[] = [];
-        possibleCoins.forEach(coin => {
+        possibleCoins.forEach((coin) => {
           if (textToAnalyze.includes(coin.toLowerCase()) || textToAnalyze.includes(coin)) {
             matchedSymbols.push(`${coin}USDT`);
           }
         });
 
-        // Date formatting
-        const pubDate = item.published_on ? new Date(item.published_on * 1000).toISOString() : new Date().toISOString();
+        let pubDate = new Date().toISOString();
+        if (item.publishedAt) {
+          const parsed = new Date(item.publishedAt);
+          if (!isNaN(parsed.getTime())) {
+            pubDate = parsed.toISOString();
+          }
+        }
+
+        let shortSummary = summary;
+        if (shortSummary.length > 220) {
+          shortSummary = shortSummary.substring(0, 220) + '...';
+        }
 
         return {
-          id: String(item.id || Math.random()),
-          title: item.title || 'Crypto News Update',
-          url: item.url || 'https://www.binance.com/en/news',
-          source: item.source_info?.name || item.source || 'Crypto News',
+          id: `news-${idx}-${Date.now()}`,
+          title: title || 'Crypto Market Update',
+          url: item.url || 'https://cointelegraph.com',
+          source: item.source || 'Crypto News',
           publishedAt: pubDate,
-          categories: item.categories ? item.categories.split('|') : ['Crypto'],
-          summary: item.body ? (item.body.length > 220 ? item.body.substring(0, 220) + '...' : item.body) : '',
+          categories: [item.source || 'Crypto', ...(matchedSymbols.length > 0 ? matchedSymbols.map((s) => s.replace('USDT', '')) : ['Market'])],
+          summary: shortSummary || title,
           sentiment,
           imageUrl: item.imageurl || null,
-          relatedSymbols: matchedSymbols.length > 0 ? matchedSymbols : ['BTCUSDT'],
+          relatedSymbols: matchedSymbols.length > 0 ? Array.from(new Set(matchedSymbols)) : ['BTCUSDT']
         };
       });
 
+      // Sort by publishedAt descending (newest first)
+      articles.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+
+      cachedNewsArticles = articles;
+      newsCacheTime = nowMs;
+
       res.json({ success: true, articles });
     } catch (err: any) {
-      // Gracefully serve fallback structured Binance / Crypto news
+      // Gracefully serve dynamic updated structured news
       const now = new Date();
       const fallbackArticles = [
         {

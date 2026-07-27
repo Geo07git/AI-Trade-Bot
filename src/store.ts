@@ -399,6 +399,20 @@ export const useTradingStore = create<TradingStore>()(
   },
   syncBinanceBalance: async () => {
     try {
+      // First ensure the server has the latest API keys and mode from store
+      const currentState = useTradingStore.getState();
+      await fetch('/api/bot/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          apiKey: currentState.apiKey?.trim(),
+          apiSecret: currentState.apiSecret?.trim(),
+          testnetApiKey: currentState.testnetApiKey?.trim(),
+          testnetApiSecret: currentState.testnetApiSecret?.trim(),
+          binanceMode: currentState.binanceMode
+        })
+      }).catch(() => {});
+
       const res = await fetch('/api/bot/sync-binance', { method: 'POST' });
       const data = await res.json();
       if (data && data.state) {

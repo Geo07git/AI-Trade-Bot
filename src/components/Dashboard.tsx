@@ -276,7 +276,7 @@ export function Dashboard() {
 
             <div className="flex flex-col xl:flex-row gap-6 items-start overflow-x-auto pb-2">
               {/* Left Side: Chart Area with exact 1045px width and 600px height */}
-              <div className="w-[720px] shrink-0 h-[360px]" style={{ width: '720px', height: '360px' }}>
+              <div className="w-[700px] shrink-0 h-[360px]" style={{ width: '700px', height: '360px' }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={displayChartData}>
                     <defs>

@@ -646,9 +646,33 @@ export class RandomForest {
     this.trees = [];
     if (dataset.length === 0) return;
     const maxFeatures = Math.max(1, Math.floor(Math.sqrt(dataset[0].features.length)));
+
+    // Group dataset by class to perform balanced bootstrapping (handling class imbalance)
+    const buys = dataset.filter(d => d.label === 1);
+    const sells = dataset.filter(d => d.label === -1);
+    const holds = dataset.filter(d => d.label === 0);
+
     for (let i = 0; i < nTrees; i++) {
-      const sample = [];
-      for (let j = 0; j < dataset.length; j++) sample.push(dataset[Math.floor(Math.random() * dataset.length)]);
+      const sample: DataPoint[] = [];
+      const sampleSizePerClass = Math.max(20, Math.floor(dataset.length / 3));
+
+      // Balanced bootstrap sampling from each class
+      if (buys.length > 0) {
+        for (let j = 0; j < sampleSizePerClass; j++) {
+          sample.push(buys[Math.floor(Math.random() * buys.length)]);
+        }
+      }
+      if (sells.length > 0) {
+        for (let j = 0; j < sampleSizePerClass; j++) {
+          sample.push(sells[Math.floor(Math.random() * sells.length)]);
+        }
+      }
+      if (holds.length > 0) {
+        for (let j = 0; j < sampleSizePerClass; j++) {
+          sample.push(holds[Math.floor(Math.random() * holds.length)]);
+        }
+      }
+
       this.trees.push(buildTree(sample, maxDepth, minSize, maxFeatures));
     }
   }
@@ -674,10 +698,10 @@ export class RandomForest {
     let value = 0;
     let prob = probHold;
 
-    if (probBuy > probSell && probBuy >= 28 && probBuy > probHold * 0.7) {
+    if (probBuy > probSell && probBuy >= 32 && probBuy > probHold * 0.75) {
       value = 1;
       prob = probBuy;
-    } else if (probSell > probBuy && probSell >= 28 && probSell > probHold * 0.7) {
+    } else if (probSell > probBuy && probSell >= 32 && probSell > probHold * 0.75) {
       value = -1;
       prob = probSell;
     }
@@ -1044,9 +1068,9 @@ export async function runRealStrategyAnalysis(
     const currentAtr = atrArr[i] || entryPrice * 0.02;
     const currentAtrPct = (currentAtr / entryPrice) * 100;
 
-    // Dynamic ATR-based barriers: 1.5x ATR for Stop Loss, 3.0x ATR for Take Profit
-    const dynSL = Math.max(0.8, Math.min(5.0, currentAtrPct * 1.5));
-    const dynTP = Math.max(1.8, Math.min(10.0, currentAtrPct * 3.0));
+    // Dynamic ATR-based barriers: 1.0x ATR for Stop Loss, 1.5x ATR for Take Profit
+    const dynSL = Math.max(0.5, Math.min(2.5, currentAtrPct * 1.0));
+    const dynTP = Math.max(0.8, Math.min(3.5, currentAtrPct * 1.5));
 
     const buyTPPrice = entryPrice * (1 + dynTP / 100);
     const buySLPrice = entryPrice * (1 - dynSL / 100);
@@ -1078,9 +1102,16 @@ export async function runRealStrategyAnalysis(
       }
     }
 
-    // Sideways market regime filter: ADX < 19 implies weak trend/choppy consolidation
-    if (adxArr[i] < 19 && label !== 0) {
-      if (Math.random() > 0.35) label = 0; // Filter choppy entries
+    // Secondary forward return check for clear trends
+    if (label === 0 && i + 8 < klines.length) {
+      const ret8 = ((klines[i + 8].close - entryPrice) / entryPrice) * 100;
+      if (ret8 > dynTP * 0.5) label = 1;
+      else if (ret8 < -dynTP * 0.5) label = -1;
+    }
+
+    // Sideways market regime filter: ADX < 18 implies weak trend/choppy consolidation
+    if (adxArr[i] < 18 && label !== 0) {
+      if (Math.random() > 0.4) label = 0; // Filter choppy entries
     }
     
     dataset.push({ features: f, label });

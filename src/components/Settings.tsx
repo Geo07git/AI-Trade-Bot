@@ -11,6 +11,8 @@ export function Settings() {
   const [binanceInspectorLoading, setBinanceInspectorLoading] = useState(false);
   const [binanceInspectorSymbol, setBinanceInspectorSymbol] = useState('BTCUSDT');
   const [binanceInspectorResult, setBinanceInspectorResult] = useState<any>(null);
+  const [telegramGuideLoading, setTelegramGuideLoading] = useState(false);
+  const [telegramGuideStatus, setTelegramGuideStatus] = useState<{ message: string; error: boolean } | null>(null);
 
   const { 
     dataInterval, 
@@ -464,6 +466,67 @@ export function Settings() {
                     placeholder="Ex: 123456789" 
                     className="w-full bg-zinc-800/40 border border-white/5 rounded-lg px-4 py-2 text-zinc-100 focus:outline-none focus:border-white/20 font-mono text-sm" 
                   />
+                </div>
+
+                <div className="pt-2 border-t border-white/5 flex flex-col gap-2">
+                  <button
+                    type="button"
+                    disabled={telegramGuideLoading || !telegramBotToken}
+                    onClick={async () => {
+                      setTelegramGuideLoading(true);
+                      setTelegramGuideStatus(null);
+                      try {
+                        // First ensure latest keys are saved to server
+                        await fetch('/api/bot/config', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            telegramBotToken: telegramBotToken.trim(),
+                            telegramChatId: telegramChatId.trim(),
+                            notificationProvider: 'telegram'
+                          })
+                        });
+
+                        const res = await fetch('/api/bot/send-telegram-guide', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ chatId: telegramChatId.trim() })
+                        });
+                        const data = await res.json();
+                        if (data && data.success) {
+                          setTelegramGuideStatus({
+                            message: '✅ Lista de comenzi a fost trimisă cu succes pe Telegram! O poți fixa (Pin) în chat.',
+                            error: false
+                          });
+                        } else {
+                          setTelegramGuideStatus({
+                            message: `⚠️ Eroare: ${data?.error || 'Verifică Bot Token și Chat ID'}`,
+                            error: true
+                          });
+                        }
+                      } catch (err: any) {
+                        setTelegramGuideStatus({
+                          message: `⚠️ Eroare rețea: ${err?.message || 'Nu s-a putut trimite ghidul'}`,
+                          error: true
+                        });
+                      } finally {
+                        setTelegramGuideLoading(false);
+                      }
+                    }}
+                    className="px-4 py-2 bg-sky-500/20 text-sky-300 border border-sky-500/40 hover:bg-sky-500/30 font-medium rounded-lg text-xs transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                  >
+                    <span>📌 Trimite & Fixează Lista de Comenzi pe Telegram</span>
+                  </button>
+
+                  {telegramGuideStatus && (
+                    <div className={`text-xs p-2.5 rounded-lg font-mono ${
+                      telegramGuideStatus.error
+                        ? 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
+                        : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
+                    }`}>
+                      {telegramGuideStatus.message}
+                    </div>
+                  )}
                 </div>
               </div>
             )}

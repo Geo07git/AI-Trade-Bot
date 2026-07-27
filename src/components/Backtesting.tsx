@@ -289,6 +289,38 @@ export function Backtesting() {
 
           {/* Results Panel */}
           <div className="col-span-12 lg:col-span-8 space-y-6">
+            
+            {/* INITIAL START BACKTEST PROMPT CARD */}
+            {!results && !multiResults && !isRunning && !isMultiRunning && (
+              <div className="bg-zinc-900/80 border border-emerald-500/30 rounded-2xl p-8 text-center space-y-5">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400">
+                  <Play className="w-7 h-7 fill-current" />
+                </div>
+                <div className="space-y-1.5 max-w-md mx-auto">
+                  <h3 className="font-serif text-lg text-white font-bold">Simularea de Backtest nu este pornită</h3>
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    Apasă pe unul din butoanele de mai jos pentru a lansa simularea pe date istorice reale Binance ({selectedSymbol} sau Multi-Monedă).
+                  </p>
+                </div>
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                  <button
+                    onClick={runBacktest}
+                    className="w-full sm:w-auto px-6 py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl text-xs uppercase tracking-wider transition-all shadow-lg shadow-emerald-500/20 cursor-pointer inline-flex items-center justify-center gap-2"
+                  >
+                    <Play className="w-4 h-4 fill-current" />
+                    <span>Pornește Backtest ({selectedSymbol})</span>
+                  </button>
+
+                  <button
+                    onClick={handleRunMultiBacktest}
+                    className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all shadow-lg shadow-indigo-600/20 cursor-pointer inline-flex items-center justify-center gap-2"
+                  >
+                    <Layers className="w-4 h-4" />
+                    <span>Lansează Multi-Monedă (7 Crypto)</span>
+                  </button>
+                </div>
+              </div>
+            )}
             {/* MULTI SYMBOL PROGRESS LOADER */}
             {isMultiRunning && (
               <div className="bg-zinc-900/50 border border-indigo-500/30 rounded-2xl p-8 flex flex-col items-center justify-center space-y-4">

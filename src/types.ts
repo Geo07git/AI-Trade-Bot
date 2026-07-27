@@ -1,4 +1,4 @@
-export type ViewState = 'dashboard' | 'strategyLab' | 'strategies' | 'backtesting' | 'journal' | 'analyst' | 'news' | 'alerts' | 'logs' | 'settings' | 'guide';
+export type ViewState = 'superDashboard' | 'dashboard' | 'strategyLab' | 'strategies' | 'backtesting' | 'journal' | 'analyst' | 'news' | 'alerts' | 'logs' | 'settings' | 'guide';
 
 export interface JournalEntry {
   id: string;

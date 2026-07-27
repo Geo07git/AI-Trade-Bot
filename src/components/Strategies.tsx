@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Play, Cpu, Zap } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useTradingStore } from '../store';
@@ -102,10 +103,8 @@ export function Strategies() {
     }
   };
 
-  // Run initial calculation when tab or symbol changes if empty
-  useEffect(() => {
-    handleRunRealCalculation();
-  }, [selectedSymbol, activeTab]);
+  // Note: Calculation is NOT auto-run on tab switch.
+  // User must explicitly click the Start button to initiate ML calculations.
 
   return (
     <div className="flex flex-col h-full bg-black text-zinc-100">
@@ -231,6 +230,28 @@ export function Strategies() {
                 </div>
               </div>
             </div>
+
+            {/* INITIAL START PROMPT PANEL */}
+            {!analysisResult && !isAnalyzing && (
+              <div className="bg-zinc-900/80 border border-emerald-500/30 rounded-2xl p-6 text-center space-y-4">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400">
+                  <Play className="w-6 h-6 fill-current" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="font-serif text-base text-white font-bold">Calculul ML nu a fost pornit</h3>
+                  <p className="text-xs text-zinc-400 max-w-sm mx-auto">
+                    Apasă pe butonul de mai jos pentru a declanșa calculul modelului Machine Learning pe datele din piață ({selectedSymbol}).
+                  </p>
+                </div>
+                <button
+                  onClick={handleRunRealCalculation}
+                  className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl text-xs transition-all shadow-lg shadow-emerald-500/20 cursor-pointer inline-flex items-center gap-2"
+                >
+                  <Play className="w-4 h-4 fill-current" />
+                  <span>▶️ PORNEȘTE CALCULUL STRATEGIEI ({selectedSymbol})</span>
+                </button>
+              </div>
+            )}
 
             {/* REAL CALCULATED TECHNICAL INDICATORS PANEL */}
             {analysisResult && (

@@ -7,6 +7,7 @@ function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
 }
 import { Sidebar } from './components/Sidebar';
+import { SuperDashboard } from './components/SuperDashboard';
 import { Dashboard } from './components/Dashboard';
 import { AIStrategyLab } from './components/AIStrategyLab';
 import { AIAnalyst } from './components/AIAnalyst';
@@ -15,6 +16,7 @@ import { Strategies } from './components/Strategies';
 import { Alerts } from './components/Alerts';
 import { UserGuide } from './components/UserGuide';
 import { Backtesting } from './components/Backtesting';
+import { TradingJournal } from './components/TradingJournal';
 import { NewsFeed } from './components/NewsFeed';
 import { Settings } from './components/Settings';
 import { useTradingStore } from './store';
@@ -43,13 +45,65 @@ export default function App() {
   const [analysisCountdown, setAnalysisCountdown] = useState(analysisInterval);
   const lastLogRef = useRef<{time: string, message: string} | null>(null);
 
-  // Poll server background bot engine state every 3 seconds
+  // Sync local credentials to server on app mount and poll server bot state
   useEffect(() => {
+    // Initial sync of credentials from localStorage to server engine
+    const localStore = useTradingStore.getState();
+    if (
+      localStore.testnetApiKey ||
+      localStore.testnetApiSecret ||
+      localStore.apiKey ||
+      localStore.apiSecret ||
+      localStore.telegramBotToken ||
+      localStore.telegramChatId ||
+      localStore.binanceMode
+    ) {
+      fetch('/api/bot/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          apiKey: localStore.apiKey?.trim(),
+          apiSecret: localStore.apiSecret?.trim(),
+          testnetApiKey: localStore.testnetApiKey?.trim(),
+          testnetApiSecret: localStore.testnetApiSecret?.trim(),
+          binanceMode: localStore.binanceMode,
+          telegramBotToken: localStore.telegramBotToken?.trim(),
+          telegramChatId: localStore.telegramChatId?.trim(),
+          discordWebhookUrl: localStore.discordWebhookUrl?.trim(),
+          notificationProvider: localStore.notificationProvider
+        })
+      }).catch(() => {});
+    }
+
     const fetchServerBotState = async () => {
       try {
         const res = await fetch('/api/bot/state');
         if (res.ok) {
           const data = await res.json();
+          const currentStore = useTradingStore.getState();
+
+          // If server is missing keys that exist locally in client, push them to server
+          if (
+            (currentStore.testnetApiKey && !data.testnetApiKey) ||
+            (currentStore.testnetApiSecret && !data.testnetApiSecret) ||
+            (currentStore.apiKey && !data.apiKey) ||
+            (currentStore.apiSecret && !data.apiSecret) ||
+            (currentStore.telegramBotToken && !data.telegramBotToken)
+          ) {
+            fetch('/api/bot/config', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                apiKey: currentStore.apiKey?.trim(),
+                apiSecret: currentStore.apiSecret?.trim(),
+                testnetApiKey: currentStore.testnetApiKey?.trim(),
+                testnetApiSecret: currentStore.testnetApiSecret?.trim(),
+                binanceMode: currentStore.binanceMode || data.binanceMode,
+                telegramBotToken: currentStore.telegramBotToken?.trim(),
+                telegramChatId: currentStore.telegramChatId?.trim()
+              })
+            }).catch(() => {});
+          }
           
           if (data.logs && data.logs.length > 0) {
             const currentLatestLog = data.logs[0];
@@ -71,13 +125,18 @@ export default function App() {
             autoTradingActive: data.autoTradingActive,
             circuitBreakerTriggered: !!data.circuitBreakerTriggered,
             circuitBreakerReason: data.circuitBreakerReason || null,
-            maxLogs: data.maxLogs || useTradingStore.getState().maxLogs || 1000,
-            notificationProvider: data.notificationProvider || useTradingStore.getState().notificationProvider,
-            discordWebhookUrl: data.discordWebhookUrl || useTradingStore.getState().discordWebhookUrl,
-            telegramBotToken: data.telegramBotToken || useTradingStore.getState().telegramBotToken,
-            telegramChatId: data.telegramChatId || useTradingStore.getState().telegramChatId,
-            timezone: data.timezone || useTradingStore.getState().timezone,
-            reportConfig: data.reportConfig || useTradingStore.getState().reportConfig,
+            maxLogs: data.maxLogs || currentStore.maxLogs || 1000,
+            notificationProvider: data.notificationProvider || currentStore.notificationProvider,
+            discordWebhookUrl: data.discordWebhookUrl || currentStore.discordWebhookUrl,
+            telegramBotToken: data.telegramBotToken || currentStore.telegramBotToken,
+            telegramChatId: data.telegramChatId || currentStore.telegramChatId,
+            timezone: data.timezone || currentStore.timezone,
+            reportConfig: data.reportConfig || currentStore.reportConfig,
+            apiKey: data.apiKey || currentStore.apiKey,
+            apiSecret: data.apiSecret || currentStore.apiSecret,
+            testnetApiKey: data.testnetApiKey || currentStore.testnetApiKey,
+            testnetApiSecret: data.testnetApiSecret || currentStore.testnetApiSecret,
+            binanceMode: data.binanceMode || currentStore.binanceMode,
           });
         }
       } catch (err) {
@@ -144,6 +203,19 @@ export default function App() {
         
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setCurrentView(currentView === 'superDashboard' ? 'dashboard' : 'superDashboard')}
+            className={cn(
+              "px-2.5 py-1 rounded-full text-[11px] font-medium border transition-all flex items-center gap-1 cursor-pointer",
+              currentView === 'superDashboard'
+                ? "bg-amber-500/20 text-amber-300 border-amber-500/40 font-semibold"
+                : "bg-zinc-800 text-zinc-300 border-white/10 hover:text-white"
+            )}
+            title="Deschide Super Dashboard pentru mobil"
+          >
+            <span>⚡ Super</span>
+          </button>
+
+          <button
             onClick={() => setAutoTradingActive(!autoTradingActive)}
             className={cn(
               "flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold border transition-all cursor-pointer",
@@ -195,7 +267,8 @@ export default function App() {
           </div>
         )}
 
-        <div className="flex-1 overflow-hidden relative">
+        <div className="flex-1 h-full overflow-hidden relative flex flex-col">
+          {currentView === 'superDashboard' && <SuperDashboard onSwitchToFullDashboard={() => setCurrentView('dashboard')} />}
           {currentView === 'dashboard' && <Dashboard />}
           {currentView === 'strategyLab' && <AIStrategyLab />}
           {currentView === 'strategies' && <Strategies />}
@@ -206,8 +279,9 @@ export default function App() {
           {currentView === 'settings' && <Settings />}
           {currentView === 'guide' && <UserGuide />}
           
-          {/* Backtesting Module */}
+          {/* Backtesting & Trading Journal Modules */}
           {currentView === 'backtesting' && <Backtesting />}
+          {currentView === 'journal' && <TradingJournal />}
         </div>
       </main>
     </div>

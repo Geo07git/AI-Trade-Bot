@@ -364,11 +364,32 @@ async function sendWebhookServer(provider: 'discord' | 'telegram', urlOrToken: s
       });
     } else if (provider === 'telegram' && urlOrToken && chatIdOrMessage && message) {
       const url = `https://api.telegram.org/bot${urlOrToken}/sendMessage`;
-      await fetch(url, {
+      // Format Markdown bold syntax (** or *) into HTML <b> tags for rock-solid Telegram rendering
+      const htmlText = message
+        .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+        .replace(/\*(.*?)\*/g, '<b>$1</b>');
+
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatIdOrMessage, text: message })
+        body: JSON.stringify({ 
+          chat_id: chatIdOrMessage, 
+          text: htmlText,
+          parse_mode: 'HTML'
+        })
       });
+
+      if (!res.ok) {
+        // Fallback send plain text if HTML parsing has any edge case
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            chat_id: chatIdOrMessage, 
+            text: message 
+          })
+        });
+      }
     }
   } catch (err) {
     console.error('Webhook error on server:', err);
@@ -381,6 +402,8 @@ class ServerBotEngine {
   private secondsCounter = 0;
   private stateFilePath = path.join(process.cwd(), 'bot_state.json');
   private telegramOffset = 0;
+  private isPollingTelegram = false;
+  private webhookCleared = false;
 
   constructor() {
     this.state = {
@@ -461,18 +484,34 @@ class ServerBotEngine {
         const defaultWatchlist = JSON.parse(JSON.stringify(this.state.watchlist));
         this.state = { ...this.state, ...parsed };
         
-        // Ensure initialBalance is valid
-        if (!this.state.initialBalance || this.state.initialBalance > this.state.balance * 10) {
-          this.state.initialBalance = this.state.balance || 500;
+        // Ensure autoTradingActive defaults to true if not explicitly false
+        if (this.state.autoTradingActive === undefined) {
+          this.state.autoTradingActive = true;
         }
 
-        // Auto-adjust legacy $10,000 portfolio to $100 if initial balance was default
-        if (this.state.initialBalance === 10000 || this.state.balance === 10000) {
-          this.state.balance = 100;
-          this.state.initialBalance = 100;
-          this.state.positions = [];
+        // Auto-adjust paper trading balance if empty or legacy mismatch
+        if (this.state.binanceMode === 'paper') {
+          if (!this.state.balance || this.state.balance < 10) {
+            this.state.balance = 10000;
+            this.state.initialBalance = 10000;
+            this.state.circuitBreakerTriggered = false;
+            this.state.circuitBreakerReason = null;
+          }
         }
-        
+
+        // Fix initialBalance mismatch in live/testnet to prevent false circuit breaker trip
+        const currentEquity = this.calculateEquity();
+        if (this.state.binanceMode !== 'paper' && currentEquity > 0) {
+          if (Math.abs(currentEquity - (this.state.initialBalance || 0)) / (this.state.initialBalance || 1) > 0.5) {
+            this.state.initialBalance = currentEquity;
+            if (this.state.circuitBreakerReason?.includes('-99') || this.state.circuitBreakerReason?.includes('10000')) {
+              this.state.circuitBreakerTriggered = false;
+              this.state.circuitBreakerReason = null;
+              this.state.autoTradingActive = true;
+            }
+          }
+        }
+
         // Merge missing symbols from default watchlist and ensure they are active
         for (const defaultItem of defaultWatchlist) {
           const existing = this.state.watchlist.find(item => item.symbol === defaultItem.symbol);
@@ -482,7 +521,7 @@ class ServerBotEngine {
             existing.active = true;
           }
         }
-        console.log('[AI.TRADE Bot] State încărcat din bot_state.json pe server');
+        console.log('[AI.TRADE Bot] State încărcat din bot_state.json pe server (AutoTrading:', this.state.autoTradingActive ? 'ACTIV' : 'OPRIT', ')');
       }
     } catch (e) {
       console.error('[AI.TRADE Bot] Eroare la citirea bot_state.json:', e);
@@ -522,6 +561,11 @@ class ServerBotEngine {
     const initial = this.state.initialBalance || 100;
     const pnlPercent = ((equity - initial) / initial) * 100;
 
+    // Ignore circuit breaker trigger if testnet/live account has negligible funds (< $1)
+    if (this.state.binanceMode !== 'paper' && equity < 1) {
+      return false;
+    }
+
     const isTriggered = (pnlPercent >= 10.0 || pnlPercent <= -5.0);
 
     if (isTriggered && !this.state.circuitBreakerTriggered) {
@@ -555,7 +599,9 @@ class ServerBotEngine {
   public resetCircuitBreaker() {
     this.state.circuitBreakerTriggered = false;
     this.state.circuitBreakerReason = null;
-    this.addLog('[CIRCUIT BREAKER RESETAT] Circuit breaker eliberat. Reluare tranzacționare permisă.', 'info', this.calculateEquity());
+    this.state.autoTradingActive = true;
+    this.state.initialBalance = this.calculateEquity();
+    this.addLog('[CIRCUIT BREAKER RESETAT] Circuit breaker eliberat și inițializat. Auto-trading reluat.', 'info', this.calculateEquity());
     this.savePersistedState();
   }
 
@@ -577,13 +623,33 @@ class ServerBotEngine {
       }
     }
     if (newConfig.watchlist !== undefined) this.state.watchlist = newConfig.watchlist;
-    if (newConfig.balance !== undefined) this.state.balance = newConfig.balance;
+    if (newConfig.initialBalance !== undefined) this.state.initialBalance = newConfig.initialBalance;
+    if (newConfig.balance !== undefined) {
+      this.state.balance = newConfig.balance;
+      if (newConfig.initialBalance === undefined) {
+        this.state.initialBalance = this.calculateEquity();
+      }
+    }
     if (newConfig.reportConfig !== undefined) this.state.reportConfig = { ...this.state.reportConfig, ...newConfig.reportConfig };
     if (newConfig.apiKey !== undefined) this.state.apiKey = newConfig.apiKey;
     if (newConfig.apiSecret !== undefined) this.state.apiSecret = newConfig.apiSecret;
     if (newConfig.testnetApiKey !== undefined) this.state.testnetApiKey = newConfig.testnetApiKey;
     if (newConfig.testnetApiSecret !== undefined) this.state.testnetApiSecret = newConfig.testnetApiSecret;
-    if (newConfig.binanceMode !== undefined) this.state.binanceMode = newConfig.binanceMode;
+    
+    // Switch binance mode and auto-reset circuit breaker
+    if (newConfig.binanceMode !== undefined) {
+      this.state.binanceMode = newConfig.binanceMode;
+      this.state.circuitBreakerTriggered = false;
+      this.state.circuitBreakerReason = null;
+      this.state.autoTradingActive = true;
+      if (newConfig.binanceMode === 'paper' && this.state.balance < 10) {
+        this.state.balance = 10000;
+        this.state.initialBalance = 10000;
+      } else {
+        this.state.initialBalance = this.calculateEquity();
+      }
+    }
+
     this.savePersistedState();
 
     if (
@@ -605,12 +671,12 @@ class ServerBotEngine {
     }
 
     const mode = this.state.binanceMode;
-    const apiKey = mode === 'testnet'
+    const apiKey = (mode === 'testnet'
       ? (this.state.testnetApiKey || this.state.apiKey)
-      : this.state.apiKey;
-    const apiSecret = mode === 'testnet'
+      : this.state.apiKey)?.trim();
+    const apiSecret = (mode === 'testnet'
       ? (this.state.testnetApiSecret || this.state.apiSecret)
-      : this.state.apiSecret;
+      : this.state.apiSecret)?.trim();
 
     if (!apiKey || !apiSecret) {
       this.addLog(`[BINANCE ${mode.toUpperCase()}] Cheile API pentru ${mode} nu sunt configurate în Setări.`, 'warning');
@@ -627,8 +693,12 @@ class ServerBotEngine {
           const totalUsdt = freeUsdt + lockedUsdt;
 
           this.state.balance = freeUsdt;
-          if (this.state.initialBalance === 100 || !this.state.initialBalance) {
-            this.state.initialBalance = totalUsdt > 0 ? totalUsdt : freeUsdt;
+          // Re-baseline initial balance to total account value on sync so circuit breaker measures real trading PnL
+          this.state.initialBalance = totalUsdt > 0 ? totalUsdt : (freeUsdt || 100);
+          if (this.state.circuitBreakerTriggered && freeUsdt > 0) {
+            this.state.circuitBreakerTriggered = false;
+            this.state.circuitBreakerReason = null;
+            this.state.autoTradingActive = true;
           }
 
           this.addLog(
@@ -661,97 +731,321 @@ class ServerBotEngine {
     this.savePersistedState();
   }
 
+  public async sendTelegramCommandGuide(chatId?: string, pin = true) {
+    const targetChatId = chatId || this.state.telegramChatId;
+    if (!this.state.telegramBotToken || !targetChatId) {
+      return { success: false, error: 'Token-ul Telegram Bot sau Chat ID nu sunt configurate.' };
+    }
+
+    const guideText = 
+      `📌 <b>GHID & LISTĂ COMENZI BOT AI.TRADE 24/7</b>\n` +
+      `<i>Păstrează sau fixează (Pin) acest mesaj în chat pentru acces rapid!</i>\n\n` +
+      `<b>📊 Interogare & Stare:</b>\n` +
+      `• <b>/portofoliu</b> sau <b>/portofolio</b> - Capital, equity & performanță PnL\n` +
+      `• <b>/stare</b> sau <b>/status</b> - Stare sistem, modul active & circuit breaker\n` +
+      `• <b>/pozitii</b> sau <b>/positions</b> - Poziții deschise curente & PnL\n` +
+      `• <b>/jurnal</b> sau <b>/tranzactii</b> - Ultima istorie de tranzacționare\n\n` +
+      `<b>⚙️ Control Execuție Automată:</b>\n` +
+      `• <b>/pauza</b> sau <b>/pause</b> - Oprește temporar tranzacționarea automată\n` +
+      `• <b>/porneste</b> sau <b>/resume</b> - Repornește tranzacționarea automată\n\n` +
+      `<b>🛒 Tranzacționare Manuală Directă:</b>\n` +
+      `• <b>/cumpara [SIMBOL] [CANTITATE]</b>\n` +
+      `  <i>Exemplu:</i> <code>/cumpara BTCUSDT 0.005</code>\n` +
+      `• <b>/vinde [SIMBOL] [CANTITATE]</b>\n` +
+      `  <i>Exemplu:</i> <code>/vinde BTCUSDT 0.005</code>\n\n` +
+      `<b>ℹ️ Ajutor:</b>\n` +
+      `• <b>/ajutor</b>, <b>/help</b>, <b>/comenzi</b> sau <b>/ghid</b> - Trimite din nou această listă.\n\n` +
+      `💡 <i>Sfat: Apasă lung pe acest mesaj și selectează <b>Pin / Fixează</b> pentru a-l avea permanent la începutul conversației!</i>`;
+
+    try {
+      const sendUrl = `https://api.telegram.org/bot${this.state.telegramBotToken}/sendMessage`;
+      const res = await fetch(sendUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: targetChatId,
+          text: guideText,
+          parse_mode: 'HTML'
+        })
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        return { success: false, error: errJson.description || 'Eroare la trimitere pe Telegram.' };
+      }
+
+      const data = await res.json();
+      const messageId = data?.result?.message_id;
+
+      if (pin && messageId) {
+        try {
+          const pinUrl = `https://api.telegram.org/bot${this.state.telegramBotToken}/pinChatMessage`;
+          await fetch(pinUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: targetChatId,
+              message_id: messageId,
+              disable_notification: false
+            })
+          });
+        } catch (pinErr) {
+          // Non-blocking if bot lacks pin permission
+        }
+      }
+
+      this.addLog('[TELEGRAM] Ghidul de comenzi a fost trimis pe Telegram cu succes!', 'info');
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Eroare conexiune Telegram' };
+    }
+  }
+
   private sendNotification(message: string) {
-    if (this.state.notificationProvider === 'discord' && this.state.discordWebhookUrl) {
+    if (this.state.discordWebhookUrl) {
       sendWebhookServer('discord', this.state.discordWebhookUrl, message);
-    } else if (this.state.notificationProvider === 'telegram' && this.state.telegramBotToken && this.state.telegramChatId) {
+    }
+    if (this.state.telegramBotToken && this.state.telegramChatId) {
       sendWebhookServer('telegram', this.state.telegramBotToken, this.state.telegramChatId, message);
     }
   }
 
   private async pollTelegramMessages() {
-    if (this.state.notificationProvider !== 'telegram' || !this.state.telegramBotToken) return;
+    if (!this.state.telegramBotToken || this.isPollingTelegram) return;
+    this.isPollingTelegram = true;
 
     try {
-      const url = `https://api.telegram.org/bot${this.state.telegramBotToken}/getUpdates?offset=${this.telegramOffset}&timeout=1`;
+      const url = `https://api.telegram.org/bot${this.state.telegramBotToken}/getUpdates?offset=${this.telegramOffset}&timeout=0`;
       const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.ok && data.result.length > 0) {
-          for (const update of data.result) {
-            this.telegramOffset = update.update_id + 1;
-            
-            if (update.message && update.message.text) {
-              const text = update.message.text.trim();
-              const chatId = update.message.chat.id.toString();
+      
+      if (!res.ok) {
+        const errText = await res.text();
+        if (res.status === 409) {
+          if (!this.webhookCleared) {
+            this.webhookCleared = true;
+            console.log('[Telegram Bot] Removing webhook to resolve 409 conflict...');
+            await fetch(`https://api.telegram.org/bot${this.state.telegramBotToken}/deleteWebhook`);
+          }
+        } else {
+          console.warn(`[Telegram Polling Warning] HTTP ${res.status}: ${errText}`);
+        }
+        return;
+      }
 
-              // Auto-set the chat ID if it's the user trying to configure it or if it's empty
-              if (!this.state.telegramChatId || this.state.telegramChatId === chatId) {
-                if (!this.state.telegramChatId) {
-                   this.state.telegramChatId = chatId;
-                   this.savePersistedState();
-                }
-                await this.handleTelegramCommand(text, chatId);
-              }
+      // Reset webhook cleared flag on successful poll
+      this.webhookCleared = false;
+
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.result) && data.result.length > 0) {
+        for (const update of data.result) {
+          this.telegramOffset = update.update_id + 1;
+          
+          if (update.message && update.message.text) {
+            const text = update.message.text.trim();
+            const chatId = update.message.chat.id.toString();
+
+            // Auto-update/bind telegramChatId if empty or different so user gets alerts & replies
+            if (this.state.telegramChatId !== chatId) {
+              this.state.telegramChatId = chatId;
+              this.savePersistedState();
+              console.log(`[Telegram Bot] Updated active telegramChatId to ${chatId}`);
             }
+
+            await this.handleTelegramCommand(text, chatId);
           }
         }
       }
-    } catch (e) {
-      // Ignore polling errors to not flood logs
+    } catch (e: any) {
+      // Catch transient network error
+    } finally {
+      this.isPollingTelegram = false;
     }
   }
 
-  private async handleTelegramCommand(command: string, chatId: string) {
-    const cmd = command.toLowerCase().split(' ')[0];
+  private async handleTelegramCommand(fullCommand: string, chatId: string) {
+    const parts = fullCommand.trim().split(/\s+/);
+    if (parts.length === 0) return;
+
+    // Handle bot tags in group chats, e.g. /position@MyBot -> /position
+    const cmd = parts[0].split('@')[0].toLowerCase();
     let reply = '';
     
     switch (cmd) {
+      case '/start':
+      case '/help':
+      case '/ajutor':
+      case '/comenzi':
+      case '/ghid':
+      case '/guide':
+        await this.sendTelegramCommandGuide(chatId, true);
+        return;
+
       case '/status':
+      case '/state':
+      case '/stare': {
         const equity = this.calculateEquity();
         const profit = equity - this.state.initialBalance;
         const profitSign = profit >= 0 ? '+' : '';
-        const positions = this.state.positions.map(p => p.symbol).join(', ') || 'Niciuna';
-        const cbStatus = this.state.circuitBreakerTriggered ? '🚨 ACTIVAT (Pauză +10%/-5% PnL)' : 'OK (Monitorizat)';
+        const activePositions = this.state.positions.map(p => `${p.symbol} (${p.amount})`).join(', ') || 'Niciuna';
+        const cbStatus = this.state.circuitBreakerTriggered 
+          ? '🚨 ACTIVAT (Pauză de protecție)' 
+          : '🟢 ACTIV (Monitorizare activă)';
         
-        reply = `📊 *AI Trading Bot Status*\n\n` +
-                `*Portofoliu:* $${equity.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}\n` +
-                `*Profit total:* ${profitSign}$${profit.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}\n` +
-                `*Status 24/7:* ${this.state.autoTradingActive ? '✅ ACTIV' : '❌ OPRIT'}\n` +
-                `*Circuit Breaker:* ${cbStatus}\n` +
-                `*Poziții deschise:* ${positions}`;
+        reply = `<b>📊 AI Trading Bot Status Server 24/7</b>\n\n` +
+                `<b>Capital total (Equity):</b> $${equity.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}\n` +
+                `<b>Profit total:</b> ${profitSign}$${profit.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}\n` +
+                `<b>Mod de operare:</b> ${this.state.binanceMode.toUpperCase()}\n` +
+                `<b>Status Auto-Trading:</b> ${this.state.autoTradingActive ? '✅ ACTIV' : '⏸️ OPRIT'}\n` +
+                `<b>Circuit Breaker:</b> ${cbStatus}\n` +
+                `<b>Poziții deschise:</b> ${activePositions}`;
         break;
+      }
+
       case '/portfolio':
+      case '/portofolio':
+      case '/portofoliu':
       case '/performance':
-        reply = `*Performanță Portofoliu*\nCapital Inițial: $${this.state.initialBalance.toFixed(2)}\nCapital Curent: $${this.calculateEquity().toFixed(2)}\nBalanță Cash: $${this.state.balance.toFixed(2)}`;
+      case '/balance':
+      case '/bal':
+      case '/capital': {
+        const equity = this.calculateEquity();
+        const pnl = equity - this.state.initialBalance;
+        const pnlPct = ((pnl / this.state.initialBalance) * 100).toFixed(2);
+        
+        reply = `<b>📈 Performanță Portofoliu</b>\n\n` +
+                `• Capital Inițial: $${this.state.initialBalance.toFixed(2)}\n` +
+                `• Capital Curent: $${equity.toFixed(2)}\n` +
+                `• Balanță Liberă (Cash): $${this.state.balance.toFixed(2)}\n` +
+                `• Profit / Pierdere: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} (${pnl >= 0 ? '+' : ''}${pnlPct}%)\n` +
+                `• Tranzacții Executate: ${this.state.totalTradesExecuted || 0}`;
         break;
+      }
+
+      case '/position':
       case '/positions':
+      case '/pozitie':
+      case '/pozitii':
+      case '/pos': {
         if (this.state.positions.length === 0) {
-          reply = 'Nicio poziție deschisă în prezent.';
+          reply = '<b>ℹ️ Nicio poziție deschisă în prezent.</b>';
         } else {
-          reply = '*Poziții deschise:*\n' + this.state.positions.map(p => 
-            `- ${p.symbol}: ${p.amount} buc @ $${p.entryPrice} (Preț actual: $${p.currentPrice})`
-          ).join('\n');
+          reply = `<b>📌 Poziții Deschise (${this.state.positions.length}):</b>\n\n` + 
+            this.state.positions.map(p => {
+              const currentVal = p.amount * (p.currentPrice || p.entryPrice);
+              const pnlVal = ((p.currentPrice || p.entryPrice) - p.entryPrice) * p.amount;
+              const pnlPct = (((p.currentPrice || p.entryPrice) - p.entryPrice) / p.entryPrice) * 100;
+              const sign = pnlVal >= 0 ? '+' : '';
+              return `• <b>${p.symbol}</b>: ${p.amount} buc @ $${p.entryPrice.toFixed(2)}\n  Preț Curent: $${(p.currentPrice || p.entryPrice).toFixed(2)} | Valoare: $${currentVal.toFixed(2)}\n  PnL: ${sign}$${pnlVal.toFixed(2)} (${sign}${pnlPct.toFixed(2)}%)`;
+            }).join('\n\n');
         }
         break;
+      }
+
+      case '/journal':
+      case '/jurnal':
+      case '/trades':
+      case '/tranzactii':
+      case '/history':
+      case '/istoric': {
+        const recentEntries = journalService.getEntries().slice(0, 5);
+        if (recentEntries.length === 0) {
+          reply = '<b>Jurnal de tranzacții gol. Nicio tranzacție înregistrată încă.</b>';
+        } else {
+          reply = `<b>📖 Ultimele ${recentEntries.length} Tranzacții din Jurnal:</b>\n\n` +
+            recentEntries.map(t => {
+              const pnlStr = t.action === 'SELL' ? ` | PnL: ${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)} (${t.pnlPercent >= 0 ? '+' : ''}${t.pnlPercent.toFixed(2)}%)` : '';
+              return `• <b>${t.action === 'BUY' ? '🟢 BUY' : '🔴 SELL'} ${t.symbol}</b> @ $${t.price.toFixed(2)}\n  Quantitate: ${t.amount} | Model: ${t.modelName} (${t.mlProbability}% prob)${pnlStr}\n  Dată: ${t.timestamp.replace('T', ' ').substring(0, 16)}`;
+            }).join('\n\n');
+        }
+        break;
+      }
+
       case '/pause':
+      case '/stop':
+      case '/pauza':
         this.state.autoTradingActive = false;
         this.savePersistedState();
-        reply = '⏸️ *Auto-Trading Oprit*\nBotul nu va mai deschide sau închide poziții automat.';
+        reply = '⏸️ <b>Auto-Trading Oprit</b>\nBotul server 24/7 nu va mai executa ordine automate.';
         break;
+
       case '/resume':
+      case '/start_bot':
+      case '/porneste':
         this.state.autoTradingActive = true;
         this.state.circuitBreakerTriggered = false;
         this.state.circuitBreakerReason = null;
         this.savePersistedState();
-        reply = '▶️ *Auto-Trading Pornit & Circuit Breaker Resetat*\nBotul 24/7 rulează acum activ pe server și scanează piața.';
+        reply = '▶️ <b>Auto-Trading Pornit & Resetat</b>\nBotul 24/7 rulează activ pe server și scanează piața.';
         break;
+
+      case '/reset':
+      case '/resetare':
+      case '/reporneste':
+        this.resetPortfolio(10000);
+        this.state.autoTradingActive = true;
+        this.savePersistedState();
+        reply = '🔄 <b>Portofoliu & Bot Resetate cu Succes!</b>\nCapitalul virtual este de $10,000 USDT, iar auto-tradingul rulează activ.';
+        break;
+
+      case '/buy':
+      case '/cumpara': {
+        if (parts.length < 3) {
+          reply = '⚠️ Format incorect. Folosește: <code>/buy SYMBOL CANTITATE</code> (ex: <code>/buy BTCUSDT 0.005</code>)';
+          break;
+        }
+        const sym = parts[1].toUpperCase();
+        const qty = parseFloat(parts[2]);
+        if (isNaN(qty) || qty <= 0) {
+          reply = '⚠️ Cantitate invalidă.';
+          break;
+        }
+        
+        const item = this.state.watchlist.find(w => w.symbol === sym);
+        const price = item?.price || 0;
+        if (price <= 0) {
+          reply = `⚠️ Nu am putut obține prețul curent pentru ${sym}. Se va încerca executarea.`;
+        }
+
+        await this.executeTrade(sym, 'BUY', price > 0 ? price : 100, qty, {
+          mlProbability: 85,
+          modelName: 'Manual Telegram Command',
+          entryReason: 'Ordin lansat manual din Telegram'
+        });
+        reply = `✅ Ordin de CUMPĂRARE transmis pentru ${qty} ${sym}.`;
+        break;
+      }
+
+      case '/sell':
+      case '/vinde': {
+        if (parts.length < 3) {
+          reply = '⚠️ Format incorect. Folosește: <code>/sell SYMBOL CANTITATE</code> (ex: <code>/sell BTCUSDT 0.005</code>)';
+          break;
+        }
+        const sym = parts[1].toUpperCase();
+        const qty = parseFloat(parts[2]);
+        if (isNaN(qty) || qty <= 0) {
+          reply = '⚠️ Cantitate invalidă.';
+          break;
+        }
+
+        const item = this.state.watchlist.find(w => w.symbol === sym);
+        const price = item?.price || 0;
+
+        await this.executeTrade(sym, 'SELL', price > 0 ? price : 100, qty, {
+          mlProbability: 85,
+          modelName: 'Manual Telegram Command',
+          entryReason: 'Ordin lansat manual din Telegram'
+        });
+        reply = `✅ Ordin de VÂNZARE transmis pentru ${qty} ${sym}.`;
+        break;
+      }
+
       default:
-        reply = `Comenzi disponibile:\n/status - Informații generale\n/portfolio - P&L\n/positions - Poziții deschise\n/pause - Oprește tranzacționarea\n/resume - Pornește tranzacționarea`;
+        reply = `🤖 <b>Comandă recunoscută.</b>\nSintaxă primită: <code>${cmd}</code>\nFolosește /help sau /ajutor pentru lista de comenzi.`;
         break;
     }
     
-    sendWebhookServer('telegram', this.state.telegramBotToken, chatId, reply);
+    await sendWebhookServer('telegram', this.state.telegramBotToken, chatId, reply);
   }
 
   public async executeTrade(
@@ -784,12 +1078,17 @@ class ServerBotEngine {
     
     if (this.state.binanceMode === 'testnet' || this.state.binanceMode === 'live') {
       try {
-        const apiKey = this.state.binanceMode === 'testnet'
+        const apiKey = (this.state.binanceMode === 'testnet'
           ? (this.state.testnetApiKey || this.state.apiKey)
-          : this.state.apiKey;
-        const apiSecret = this.state.binanceMode === 'testnet'
+          : this.state.apiKey)?.trim();
+        const apiSecret = (this.state.binanceMode === 'testnet'
           ? (this.state.testnetApiSecret || this.state.apiSecret)
-          : this.state.apiSecret;
+          : this.state.apiSecret)?.trim();
+
+        if (!apiKey || !apiSecret) {
+          this.addLog(`[BINANCE ${this.state.binanceMode.toUpperCase()}] Execuție anulată: Cheile API pentru ${this.state.binanceMode} nu sunt configurate în Setări.`, 'warning');
+          return;
+        }
 
         const client = createBinanceClient({
           apiKey,
@@ -1008,6 +1307,11 @@ class ServerBotEngine {
 
     const config = this.state.reportConfig;
 
+    // Record or update daily snapshot in Trading Journal database
+    const currentEquity = this.calculateEquity();
+    const openPnL = this.state.positions.reduce((acc, p) => acc + ((p.currentPrice - p.entryPrice) * p.amount), 0);
+    journalService.recordDailySnapshot(currentEquity, openPnL);
+
     if (config.daily.enabled && config.daily.time === currentTime) {
       this.sendNotification(this.generateDailyReport(now));
     }
@@ -1137,6 +1441,14 @@ class ServerBotEngine {
       return;
     }
 
+    // Auto-replenish paper trading capital if empty and no positions held
+    if (this.state.binanceMode === 'paper' && this.state.balance < 10 && this.state.positions.length === 0) {
+      this.state.balance = 10000;
+      this.state.initialBalance = 10000;
+      this.addLog('[PAPER TRADING] Capitalul virtual a fost reîncărcat automat la $10,000 USDT pentru continuitate.', 'info', 10000);
+      this.savePersistedState();
+    }
+
     const activeItems = this.state.watchlist.filter(w => w.active);
     if (activeItems.length === 0) return;
 
@@ -1173,6 +1485,9 @@ class ServerBotEngine {
                 this.addLog(`[Signal Server ML] ${item.symbol}: BUY (${signal.prob}% prob). Alocare 20% ($${allocation.toFixed(2)}). Executăm cumpărare.`, 'info');
                 await this.executeTrade(item.symbol, 'BUY', currentPrice, amountToBuy);
               }
+            } else if (this.state.binanceMode !== 'paper' && this.state.balance < 10) {
+              // Warn once about low testnet/live balance
+              console.warn(`[BINANCE ${this.state.binanceMode.toUpperCase()}] Balanță USDT scăzută ($${this.state.balance.toFixed(2)}). Ordin ne-executat.`);
             }
           } else if (signal.action === 'SELL' && signal.prob >= 60 && isHolding) {
             this.addLog(`[Signal Server ML] ${item.symbol}: SELL (${signal.prob}% prob). Executăm vânzare automat.`, 'info');

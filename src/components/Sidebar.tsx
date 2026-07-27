@@ -19,10 +19,12 @@ interface SidebarProps {
 export function Sidebar({ currentView, onViewChange, isOpenMobile, onCloseMobile }: SidebarProps) {
   const { autoTradingActive, setAutoTradingActive } = useTradingStore();
   const navItems: { id: ViewState; label: string }[] = [
-    { id: 'dashboard', label: 'Dashboard' },
+    { id: 'superDashboard', label: '⚡ Super Dashboard' },
+    { id: 'dashboard', label: 'Dashboard Complet' },
     { id: 'strategyLab', label: 'AI Strategy Lab' },
     { id: 'strategies', label: 'ML Strategies' },
     { id: 'backtesting', label: 'Backtesting' },
+    { id: 'journal', label: 'Trading Journal' },
     { id: 'analyst', label: 'AI Analyst' },
     { id: 'news', label: 'Flux Știri Binance' },
     { id: 'alerts', label: 'Alerts' },
