@@ -211,6 +211,12 @@ const BASELINE_PRICES: Record<string, number> = {
   'RENDERUSDT': 6.20,
   'PEPE': 0.000009,
   'PEPEUSDT': 0.000009,
+  'RIF': 0.08,
+  'RIFUSDT': 0.08,
+  'KORUB': 14.30,
+  'KORUBUSDT': 14.30,
+  'SHIB': 0.000017,
+  'SHIBUSDT': 0.000017,
   'NVDA': 125.80,
   'AAPL': 224.50,
   'MSFT': 412.30,
@@ -222,16 +228,24 @@ const BASELINE_PRICES: Record<string, number> = {
 };
 
 function getFallbackBasePrice(symbol: string): number {
-  const cleanSymbol = symbol.trim().toUpperCase();
+  let cleanSymbol = symbol.trim().toUpperCase();
+  if (cleanSymbol.endsWith('SDT') && !cleanSymbol.endsWith('USDT')) {
+    cleanSymbol = cleanSymbol.replace(/SDT$/, 'USDT');
+  }
+
   if (BASELINE_PRICES[cleanSymbol] !== undefined) {
     return BASELINE_PRICES[cleanSymbol];
   }
 
   // Check base asset if ending with USDT
   if (cleanSymbol.endsWith('USDT')) {
-    const baseAsset = cleanSymbol.replace('USDT', '');
+    const baseAsset = cleanSymbol.replace(/USDT$/, '');
     if (BASELINE_PRICES[baseAsset] !== undefined) {
       return BASELINE_PRICES[baseAsset];
+    }
+  } else {
+    if (BASELINE_PRICES[cleanSymbol + 'USDT'] !== undefined) {
+      return BASELINE_PRICES[cleanSymbol + 'USDT'];
     }
   }
 
@@ -240,17 +254,26 @@ function getFallbackBasePrice(symbol: string): number {
     hash = cleanSymbol.charCodeAt(i) + ((hash << 5) - hash);
   }
   const absoluteHash = Math.abs(hash);
-  // Return a realistic crypto price between $0.10 and $10.00 for unknown tokens
-  return parseFloat((0.10 + (absoluteHash % 1000) / 100).toFixed(4));
+  // Return a realistic crypto price between $0.05 and $2.50 for unknown tokens
+  return parseFloat((0.05 + (absoluteHash % 245) / 100).toFixed(4));
 }
 
 async function fetchLivePriceServer(symbol: string): Promise<number | null> {
-  const cleanSymbol = symbol.trim().toUpperCase();
+  let cleanSymbol = symbol.trim().toUpperCase();
+  if (cleanSymbol.endsWith('SDT') && !cleanSymbol.endsWith('USDT')) {
+    cleanSymbol = cleanSymbol.replace(/SDT$/, 'USDT');
+  }
+
+  const stocks = ['NVDA', 'AAPL', 'MSFT', 'TSLA', 'AMD', 'COIN', 'SPY', 'QQQ'];
+  const querySymbol = (!cleanSymbol.endsWith('USDT') && !stocks.includes(cleanSymbol))
+    ? `${cleanSymbol}USDT`
+    : cleanSymbol;
+
   const endpoints = [
-    `https://api.binance.com/api/v3/ticker/price?symbol=${cleanSymbol}`,
-    `https://api1.binance.com/api/v3/ticker/price?symbol=${cleanSymbol}`,
-    `https://api3.binance.com/api/v3/ticker/price?symbol=${cleanSymbol}`,
-    `https://data-api.binance.vision/api/v3/ticker/price?symbol=${cleanSymbol}`
+    `https://api.binance.com/api/v3/ticker/price?symbol=${querySymbol}`,
+    `https://api1.binance.com/api/v3/ticker/price?symbol=${querySymbol}`,
+    `https://api3.binance.com/api/v3/ticker/price?symbol=${querySymbol}`,
+    `https://data-api.binance.vision/api/v3/ticker/price?symbol=${querySymbol}`
   ];
 
   for (const url of endpoints) {
@@ -272,7 +295,7 @@ async function fetchLivePriceServer(symbol: string): Promise<number | null> {
   }
 
   // Fallback to baseline or deterministic price if external network is down or socket hangs
-  return getFallbackBasePrice(cleanSymbol);
+  return getFallbackBasePrice(querySymbol);
 }
 
 const serverSignalCache = new Map<string, { result: { action: 'BUY' | 'SELL' | 'HOLD'; prob: number; modelName: string; reason: string }; timestamp: number }>();
@@ -1135,9 +1158,16 @@ class ServerBotEngine {
     if (lastPrice && lastPrice > 0) {
       const diff = Math.abs(price - lastPrice) / lastPrice;
       if (diff > 0.20) {
-        this.addLog(`[SAFETY] Preț anormal ignorat pentru ${symbol}: $${lastPrice} -> $${price} (variație ${(diff * 100).toFixed(1)}%). Ordin anulat.`, 'warning');
-        console.warn(`Preț anormal pentru ${symbol}: ${lastPrice} -> ${price}`);
-        return;
+        if (diff > 0.40) {
+          // Auto-recalibrate corrupt price from old fallback or state
+          console.warn(`[SAFETY RE-SYNC] Re-calibrare preț stocat pentru ${symbol}: $${lastPrice} -> $${price}`);
+          if (item) item.price = price;
+          if (pos) pos.currentPrice = price;
+        } else {
+          this.addLog(`[SAFETY] Preț anormal ignorat pentru ${symbol}: $${lastPrice} -> $${price} (variație ${(diff * 100).toFixed(1)}%). Ordin anulat.`, 'warning');
+          console.warn(`Preț anormal pentru ${symbol}: ${lastPrice} -> ${price}`);
+          return;
+        }
       }
     }
 
@@ -1537,9 +1567,15 @@ class ServerBotEngine {
       if (lastPrice > 0) {
         const diff = Math.abs(livePrice - lastPrice) / lastPrice;
         if (diff > 0.20) {
-          this.addLog(`[SAFETY] Preț anormal ignorat pentru ${item.symbol}: $${lastPrice} -> $${livePrice} (${(diff * 100).toFixed(1)}% variație)`, 'warning');
-          console.warn(`Preț anormal pentru ${item.symbol}: ${lastPrice} -> ${livePrice}`);
-          continue;
+          if (diff > 0.40) {
+            console.warn(`[SAFETY RE-SYNC] Re-calibrare preț pentru ${item.symbol}: $${lastPrice} -> $${livePrice}`);
+            item.price = livePrice;
+            if (pos) pos.currentPrice = livePrice;
+          } else {
+            this.addLog(`[SAFETY] Preț anormal ignorat pentru ${item.symbol}: $${lastPrice} -> $${livePrice} (${(diff * 100).toFixed(1)}% variație)`, 'warning');
+            console.warn(`Preț anormal pentru ${item.symbol}: ${lastPrice} -> ${livePrice}`);
+            continue;
+          }
         }
       }
 
