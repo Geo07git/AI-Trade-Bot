@@ -23,17 +23,17 @@ export function Strategies() {
   const [progress, setProgress] = useState(0);
 
   // Model parameters
-  const [maxDepth, setMaxDepth] = useState(9);
-  const [learningRate, setLearningRate] = useState(0.02);
+  const [maxDepth, setMaxDepth] = useState(8);
+  const [learningRate, setLearningRate] = useState(0.05);
   const [numLeaves, setNumLeaves] = useState(31);
   const [boostingType, setBoostingType] = useState('gbdt');
-  const [nEstimators, setNEstimators] = useState(250);
+  const [nEstimators, setNEstimators] = useState(200);
   const [criterion, setCriterion] = useState('gini');
 
   // Risk Management
   const [stopLoss, setStopLoss] = useState(2.0);
   const [takeProfit, setTakeProfit] = useState(4.0);
-  const [confidenceThreshold, setConfidenceThreshold] = useState(25);
+  const [confidenceThreshold, setConfidenceThreshold] = useState(60);
   const [riskPerTrade, setRiskPerTrade] = useState(1.0);
 
   // Real analysis state output
@@ -527,6 +527,48 @@ export function Strategies() {
                       <span>Articole Analizate:</span>
                       <span>🟢 {analysisResult.newsSentiment.bullishCount} Bullish | 🔴 {analysisResult.newsSentiment.bearishCount} Bearish | ⚪ {analysisResult.newsSentiment.neutralCount} Neutral</span>
                     </div>
+                  </div>
+                )}
+                {/* MARKET REGIME & META MODEL STATS CARDS */}
+                {(analysisResult.marketRegime || analysisResult.metaModelStats) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 font-mono text-xs">
+                    {analysisResult.marketRegime && (
+                      <div className="bg-black/60 border border-indigo-500/20 rounded-xl p-3.5 space-y-1.5">
+                        <div className="flex items-center justify-between text-[11px] text-indigo-400 font-semibold">
+                          <span className="flex items-center gap-1.5">
+                            <span>🧭</span> Detecție Regim Piață
+                          </span>
+                          <span className="px-2 py-0.5 rounded text-[10px] bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 uppercase font-bold">
+                            {analysisResult.marketRegime.currentRegime}
+                          </span>
+                        </div>
+                        <p className="text-zinc-300 font-sans text-xs">{analysisResult.marketRegime.regimeDescription}</p>
+                        <div className="flex justify-between text-[10px] text-zinc-500 pt-1 border-t border-white/5">
+                          <span>ADX: <strong className="text-zinc-300">{analysisResult.marketRegime.adx}</strong></span>
+                          <span>ATR %: <strong className="text-zinc-300">{analysisResult.marketRegime.atrPercent}%</strong></span>
+                        </div>
+                      </div>
+                    )}
+
+                    {analysisResult.metaModelStats && (
+                      <div className="bg-black/60 border border-emerald-500/20 rounded-xl p-3.5 space-y-1.5">
+                        <div className="flex items-center justify-between text-[11px] text-emerald-400 font-semibold">
+                          <span className="flex items-center gap-1.5">
+                            <span>🤖</span> Meta Model (Logistic Regression)
+                          </span>
+                          <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 uppercase font-bold">
+                            Meta-Labeling
+                          </span>
+                        </div>
+                        <p className="text-zinc-300 font-sans text-xs">
+                          Filtru activ peste Random Forest pentru eliminarea intrărilor cu risc crescut.
+                        </p>
+                        <div className="flex justify-between text-[10px] text-zinc-500 pt-1 border-t border-white/5">
+                          <span>Tranzacții Filtrate (Veto): <strong className="text-rose-400">{analysisResult.metaModelStats.filteredTradesCount}</strong></span>
+                          <span>Boost Profit Factor: <strong className="text-emerald-400">+{analysisResult.metaModelStats.metaProfitFactorBoost}x</strong></span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
