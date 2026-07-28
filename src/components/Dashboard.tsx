@@ -41,6 +41,24 @@ export function Dashboard() {
   const [tradeAmountUsdt, setTradeAmountUsdt] = useState<number>(10);
   const [tradeMessage, setTradeMessage] = useState<string | null>(null);
 
+  // Sequential Launch Circuit State
+  const [mlEngineStarted, setMlEngineStarted] = useState<boolean>(() => {
+    return localStorage.getItem('mlEngineStarted') === 'true';
+  });
+  const [aiStrategyLabStarted, setAiStrategyLabStarted] = useState<boolean>(() => {
+    return localStorage.getItem('aiStrategyLabStarted') === 'true';
+  });
+
+  const handleStartMl = () => {
+    setMlEngineStarted(true);
+    localStorage.setItem('mlEngineStarted', 'true');
+  };
+
+  const handleStartAiLab = () => {
+    setAiStrategyLabStarted(true);
+    localStorage.setItem('aiStrategyLabStarted', 'true');
+  };
+
   useEffect(() => {
     fetch('/api/news')
       .then(res => res.json())
@@ -261,6 +279,116 @@ export function Dashboard() {
       </header>
 
       <div className="p-8 overflow-y-auto flex-1 space-y-6">
+        {/* Sequential Launch Circuit Banner */}
+        <div className="bg-zinc-900/80 border border-emerald-500/20 rounded-2xl p-5 backdrop-blur-sm">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-white/5">
+            <div>
+              <div className="flex items-center gap-2">
+                <Zap className="w-4 h-4 text-emerald-400 animate-pulse" />
+                <h3 className="text-sm font-semibold text-white uppercase tracking-wider font-mono">
+                  Circuit de Control & Pornire Sigură (Secvență Pas-cu-Pas)
+                </h3>
+              </div>
+              <p className="text-xs text-zinc-400 mt-1">
+                La pornirea aplicației, Serverul 24/7 este OPRIT implicit. Parcurgeți secvența de mai jos pentru pornire sigură:
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+            {/* Step 1: ML Strategies */}
+            <div className={cn(
+              "p-4 rounded-xl border flex flex-col justify-between gap-3 transition-all",
+              mlEngineStarted 
+                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                : "bg-zinc-950/60 border-white/10 text-zinc-300"
+            )}>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-mono uppercase font-bold text-zinc-400">PASUL 1</span>
+                  {mlEngineStarted && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+                </div>
+                <h4 className="text-xs font-semibold text-white">1. ML Strategies & Indicatori</h4>
+                <p className="text-[11px] text-zinc-400 mt-1">Calcul semnale RSI/MACD & analiză sentiment din știri.</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleStartMl}
+                className={cn(
+                  "w-full py-2 px-3 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5",
+                  mlEngineStarted
+                    ? "bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30"
+                    : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm"
+                )}
+              >
+                {mlEngineStarted ? "✓ ML Strategies Activ" : "Pornire Manuală ML Strategies"}
+              </button>
+            </div>
+
+            {/* Step 2: AI Strategy Lab */}
+            <div className={cn(
+              "p-4 rounded-xl border flex flex-col justify-between gap-3 transition-all",
+              aiStrategyLabStarted 
+                ? "bg-purple-500/10 border-purple-500/30 text-purple-300"
+                : "bg-zinc-950/60 border-white/10 text-zinc-300"
+            )}>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-mono uppercase font-bold text-zinc-400">PASUL 2</span>
+                  {aiStrategyLabStarted && <CheckCircle2 className="w-4 h-4 text-purple-400" />}
+                </div>
+                <h4 className="text-xs font-semibold text-white">2. AI Strategy Lab</h4>
+                <p className="text-[11px] text-zinc-400 mt-1">Validare reguli AI, praguri probabilitate & Stop-Loss.</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleStartAiLab}
+                className={cn(
+                  "w-full py-2 px-3 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5",
+                  aiStrategyLabStarted
+                    ? "bg-purple-500/20 border border-purple-500/40 text-purple-300 hover:bg-purple-500/30"
+                    : "bg-purple-600 hover:bg-purple-500 text-white shadow-sm"
+                )}
+              >
+                {aiStrategyLabStarted ? "✓ AI Lab Validat" : "Pornire Manuală AI Strategy Lab"}
+              </button>
+            </div>
+
+            {/* Step 3: Server 24/7 & Auto-Trading */}
+            <div className={cn(
+              "p-4 rounded-xl border flex flex-col justify-between gap-3 transition-all",
+              autoTradingActive 
+                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+                : "bg-zinc-950/60 border-white/10 text-zinc-300"
+            )}>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-mono uppercase font-bold text-zinc-400">PASUL 3 (FINAL)</span>
+                  <span className={cn("w-2 h-2 rounded-full", autoTradingActive ? "bg-emerald-400 animate-pulse" : "bg-rose-500")} />
+                </div>
+                <h4 className="text-xs font-semibold text-white">3. Server 24/7 & Tranzacționare</h4>
+                <p className="text-[11px] text-zinc-400 mt-1">Execuție automată ordine pe Binance / Testnet / Paper.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!mlEngineStarted) handleStartMl();
+                  if (!aiStrategyLabStarted) handleStartAiLab();
+                  setAutoTradingActive(!autoTradingActive);
+                }}
+                className={cn(
+                  "w-full py-2 px-3 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5",
+                  autoTradingActive
+                    ? "bg-rose-500/20 border border-rose-500/40 text-rose-300 hover:bg-rose-500/30"
+                    : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm"
+                )}
+              >
+                {autoTradingActive ? "OPREȘTE Server 24/7" : "PORNEȘTE Server 24/7 + Tranzacționarea"}
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div className="grid grid-cols-12 gap-6">
           {/* Chart Section */}
           <div className="col-span-12 bg-zinc-900/50 border border-white/5 rounded-2xl p-6 relative overflow-x-auto">
@@ -522,11 +650,19 @@ export function Dashboard() {
                         <div className="flex items-center justify-end gap-1.5">
                           <button
                             type="button"
+                            onClick={() => handleManualTrade(item.symbol, 'BUY', 10)}
+                            className="px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[11px] font-bold transition-colors"
+                            title="Cumpără $10 USDT din această monedă"
+                          >
+                            +$10
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => handleManualTrade(item.symbol, 'BUY', 50)}
-                            className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[11px] font-bold transition-colors"
+                            className="px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[11px] font-bold transition-colors"
                             title="Cumpără $50 USDT din această monedă"
                           >
-                            +Cumpără $50
+                            +$50
                           </button>
                           <button 
                             onClick={() => toggleWatchlistActive(item.symbol)}

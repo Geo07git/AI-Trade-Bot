@@ -110,7 +110,7 @@ export const useTradingStore = create<TradingStore>()(
   positions: [],
   logs: [],
   maxLogs: 1000,
-  autoTradingActive: true,
+  autoTradingActive: false,
   circuitBreakerTriggered: false,
   circuitBreakerReason: null,
   dataInterval: 30, // 30 seconds
@@ -167,8 +167,7 @@ export const useTradingStore = create<TradingStore>()(
       initialBalance: state.initialBalance + amount,
       logs: [
         {
-          id: String(Date.now()),
-          timestamp: new Date().toLocaleTimeString(),
+          time: new Date().toLocaleTimeString(),
           message: `➕ Depunere/Adăugare fonduri: +$${amount.toFixed(2)} USDT adăugați în balanță.`,
           type: 'info',
           equity: state.balance + amount
@@ -475,8 +474,8 @@ export const useTradingStore = create<TradingStore>()(
         });
       }
       return data;
-    } catch (e) {
-      console.error('Failed to sync binance balance', e);
+    } catch (e: any) {
+      console.warn(`Failed to sync binance balance: ${e?.message || e}`);
       return { success: false, error: 'Network error' };
     }
   },

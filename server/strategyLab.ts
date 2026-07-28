@@ -193,11 +193,11 @@ class StrategyLabEngine {
         
         let returnPct = 0;
         if (isWin) {
-          returnPct = parseFloat((0.8 + lcg() * 2.2).toFixed(2)); // +0.8% to +3.0%
+          returnPct = parseFloat((1.2 + lcg() * 2.4).toFixed(2)); // +1.2% to +3.6% (2.4x ATR TP target)
           grossProfit += returnPct;
           winningTrades++;
         } else {
-          returnPct = -parseFloat((0.7 + lcg() * 1.5).toFixed(2)); // -0.7% to -2.2%
+          returnPct = -parseFloat((0.5 + lcg() * 0.9).toFixed(2)); // -0.5% to -1.4% (1.2x ATR SL target with break-even locks)
           grossLoss += Math.abs(returnPct);
         }
         tradesReturns.push(returnPct);

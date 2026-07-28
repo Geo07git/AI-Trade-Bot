@@ -225,21 +225,64 @@ async function startServer() {
       const bearishKeywords = ['crash', 'drop', 'dump', 'bear', 'plunge', 'fall', 'decline', 'ban', 'lawsuit', 'sec', 'hack', 'exploit', 'liquidation', 'loss', 'risk', 'warning', 'sell', 'investigation', 'arrest', 'outflow'];
       const possibleCoins = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT', 'NEAR', 'ATOM', 'PEPE', 'SHIB', 'SUI', 'APT'];
 
+      const rawArticlesCollected: any[] = [];
+
+      // 1. Fetch from CryptoCompare Public News API (extremely reliable, real-time live news)
+      try {
+        const ccRes = await fetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN', {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+        });
+        if (ccRes.ok) {
+          const ccData = await ccRes.json();
+          if (ccData && Array.isArray(ccData.Data)) {
+            ccData.Data.forEach((item: any) => {
+              rawArticlesCollected.push({
+                title: item.title,
+                url: item.url,
+                source: item.source_info?.name || item.source || 'Crypto News',
+                publishedAt: item.published_on ? new Date(item.published_on * 1000).toISOString() : new Date().toISOString(),
+                body: item.body || item.title || '',
+                imageurl: item.imageurl || null
+              });
+            });
+          }
+        }
+      } catch (err) {
+        // Continue to other sources
+      }
+
+      // 2. Fetch from Binance CMS Official Announcements API
+      try {
+        const bnRes = await fetch('https://www.binance.com/bapi/composite/v1/public/cms/article/catalog/list/query?catalogId=48&pageNo=1&pageSize=15', {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+        });
+        if (bnRes.ok) {
+          const bnData = await bnRes.json();
+          const articles = bnData?.data?.articles || bnData?.data?.catalogs?.[0]?.articles;
+          if (Array.isArray(articles)) {
+            articles.forEach((item: any) => {
+              rawArticlesCollected.push({
+                title: item.title,
+                url: `https://www.binance.com/en/support/announcement/${item.code || item.id}`,
+                source: 'Binance Announcements',
+                publishedAt: item.releaseDate ? new Date(item.releaseDate).toISOString() : new Date().toISOString(),
+                body: item.title || 'Binance official announcement',
+                imageurl: 'https://images.unsplash.com/photo-1621416894569-0f39ed31d247?auto=format&fit=crop&w=600&q=80'
+              });
+            });
+          }
+        }
+      } catch (err) {
+        // Continue
+      }
+
+      // 3. Try fetching via JSON RSS converters
       const rss2JsonUrls = [
         { url: 'https://api.rss2json.com/v1/api.json?rss_url=https://cointelegraph.com/rss', source: 'Cointelegraph' },
         { url: 'https://api.rss2json.com/v1/api.json?rss_url=https://www.coindesk.com/arc/outboundfeeds/rss/', source: 'CoinDesk' },
         { url: 'https://api.rss2json.com/v1/api.json?rss_url=https://decrypt.co/feed', source: 'Decrypt' }
       ];
 
-      const directXmlUrls = [
-        { url: 'https://cointelegraph.com/rss', source: 'Cointelegraph' },
-        { url: 'https://www.coindesk.com/arc/outboundfeeds/rss/', source: 'CoinDesk' },
-        { url: 'https://decrypt.co/feed', source: 'Decrypt' }
-      ];
-
-      let rawArticlesCollected: any[] = [];
-
-      // 1. Try fetching via JSON converters (fast & formatted)
       const jsonPromises = rss2JsonUrls.map(async (src) => {
         try {
           const response = await fetch(src.url, {
@@ -270,8 +313,13 @@ async function startServer() {
         }
       });
 
-      // 2. Fallback to direct XML parsing if json converters returned few articles
+      // 4. Fallback to direct XML parsing if articles returned are few
       if (rawArticlesCollected.length < 5) {
+        const directXmlUrls = [
+          { url: 'https://cointelegraph.com/rss', source: 'Cointelegraph' },
+          { url: 'https://www.coindesk.com/arc/outboundfeeds/rss/', source: 'CoinDesk' },
+          { url: 'https://decrypt.co/feed', source: 'Decrypt' }
+        ];
         const xmlPromises = directXmlUrls.map(async (src) => {
           try {
             const response = await fetch(src.url, {
