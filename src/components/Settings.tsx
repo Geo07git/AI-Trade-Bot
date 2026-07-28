@@ -13,8 +13,8 @@ export function Settings() {
   const [binanceInspectorResult, setBinanceInspectorResult] = useState<any>(null);
   const [telegramGuideLoading, setTelegramGuideLoading] = useState(false);
   const [telegramGuideStatus, setTelegramGuideStatus] = useState<{ message: string; error: boolean } | null>(null);
-  const [customPaperBalance, setCustomPaperBalance] = useState('300');
-  const [addTopupAmount, setAddTopupAmount] = useState('50');
+  const [customPaperBalance, setCustomPaperBalance] = useState('200');
+  const [addTopupAmount, setAddTopupAmount] = useState('10');
   const [topupSuccessMsg, setTopupSuccessMsg] = useState<string | null>(null);
 
   const { 
@@ -686,7 +686,7 @@ export function Settings() {
                     ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30 font-semibold'
                     : 'bg-zinc-800/60 hover:bg-zinc-800 text-zinc-300 border-white/10'
                   }`}>
-                  Setează $${amt} USDT {amt === 300 ? '(Recomandat)' : ''}
+                  Setează $${amt} USDT {amt === 200 ? '(Recomandat)' : ''}
                 </button>
               ))}
             </div>

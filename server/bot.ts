@@ -1256,10 +1256,10 @@ class ServerBotEngine {
 
         const order = await client.order(orderParams);
         
-        // If order successful, update real balance
+        // If order successful, update real balance (only for live or testnet with adequate balance)
         if (order && (order.status === 'FILLED' || order.status === 'NEW')) {
           console.log(`[Binance Executed] ${action} ${symbol} order filled successfully on ${this.state.binanceMode}`);
-          if (realFreeUSDT !== null) {
+          if (realFreeUSDT !== null && (this.state.binanceMode === 'live' || (this.state.binanceMode === 'testnet' && realFreeUSDT >= 10))) {
             this.state.balance = realFreeUSDT;
           }
         }
@@ -1611,12 +1611,12 @@ class ServerBotEngine {
       return;
     }
 
-    // Auto-replenish paper trading capital if empty and no positions held
-    if (this.state.binanceMode === 'paper' && this.state.balance < 10 && this.state.positions.length === 0) {
-      const replenishAmt = this.state.initialBalance || 300;
+    // Auto-replenish paper/testnet trading capital if balance depleted and no positions held
+    if ((this.state.binanceMode === 'paper' || this.state.binanceMode === 'testnet') && this.state.balance < 9.5 && this.state.positions.length === 0) {
+      const replenishAmt = (this.state.initialBalance && this.state.initialBalance >= 10) ? this.state.initialBalance : 300;
       this.state.balance = replenishAmt;
       this.state.initialBalance = replenishAmt;
-      this.addLog(`[PAPER TRADING] Capitalul virtual a fost reîncărcat automat la $${replenishAmt} USDT pentru continuitate.`, 'info', replenishAmt);
+      this.addLog(`[REFILL BALANȚĂ] Capitalul virtual a fost reîncărcat automat la $${replenishAmt.toFixed(2)} USDT pentru continuitate.`, 'info', replenishAmt);
       this.savePersistedState();
     }
 
@@ -1662,17 +1662,18 @@ class ServerBotEngine {
           this.addLog(`[Signal AI BUY] ${item.symbol} (Scor Composite: ${signal.prob}% | ${signal.reason}), dar Auto-Trading este OPRIT.`, 'warning');
         } else if (isHolding) {
           // Already holding this position
-        } else if (this.state.balance < 10) {
-          this.addLog(`[Signal AI BUY] ${item.symbol} (Scor Composite: ${signal.prob}%), dar balanța disponibilă rămasă ($${this.state.balance.toFixed(2)} USDT) este sub minimul de $10 USDT.`, 'warning');
+        } else if (this.state.balance < 9.5) {
+          this.addLog(`[Signal AI BUY] ${item.symbol} (Scor: ${signal.prob}%): Fonduri disponibile ($${this.state.balance.toFixed(2)} USDT) din cele ${this.state.positions.length} poziții deschise. Așteptăm eliberarea de capital (TP/SL) pentru noi intrări.`, 'warning');
         } else {
           const equity = this.calculateEquity();
           const targetAllocation = Math.max(10, parseFloat((equity * 0.10).toFixed(2)));
           const allocation = Math.min(this.state.balance, targetAllocation);
 
-          if (allocation >= 10) {
-            const amountToBuy = parseFloat((allocation / currentPrice).toFixed(6));
+          if (allocation >= 9.5) {
+            const actualAlloc = Math.min(this.state.balance, allocation);
+            const amountToBuy = parseFloat((actualAlloc / currentPrice).toFixed(6));
             if (amountToBuy > 0) {
-              this.addLog(`[Signal Server ML 2.0] ${item.symbol}: BUY (${signal.prob}% prob). Alocare 10% ($${allocation.toFixed(2)} USDT). Executăm cumpărare.`, 'info');
+              this.addLog(`[Signal Server ML 2.0] ${item.symbol}: BUY (${signal.prob}% prob). Alocare $${actualAlloc.toFixed(2)} USDT. Executăm cumpărare.`, 'info');
               await this.executeTrade(item.symbol, 'BUY', currentPrice, amountToBuy, {
                 mlProbability: signal.prob,
                 modelName: signal.modelName,
@@ -1680,7 +1681,7 @@ class ServerBotEngine {
               });
             }
           } else {
-            this.addLog(`[Signal AI BUY] ${item.symbol} (Scor: ${signal.prob}%), dar alocarea rămasă ($${allocation.toFixed(2)} USDT) este sub minimul de $10 USDT.`, 'warning');
+            this.addLog(`[Signal AI BUY] ${item.symbol} (Scor: ${signal.prob}%): Alocarea rămasă ($${allocation.toFixed(2)} USDT) este sub minimul de $10 USDT per ordin.`, 'warning');
           }
         }
       } else if (signal.action === 'SELL' && signal.prob >= 55 && isHolding) {
