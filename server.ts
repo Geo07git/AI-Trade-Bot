@@ -94,6 +94,11 @@ async function startServer() {
     res.json({ success: true, state: botEngine.state });
   });
 
+  app.all('/api/bot/pulse', (req, res) => {
+    const pulseData = botEngine.triggerPulseCheck();
+    res.json({ success: true, ...pulseData, state: botEngine.state });
+  });
+
   app.post('/api/bot/send-telegram-guide', async (req, res) => {
     const { chatId } = req.body || {};
     const result = await botEngine.sendTelegramCommandGuide(chatId, true);

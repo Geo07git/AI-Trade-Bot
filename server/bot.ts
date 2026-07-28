@@ -1430,6 +1430,14 @@ class ServerBotEngine {
         this.checkAndSendReports();
       }
 
+      // Periodic Automatic Heartbeat Log every 3 minutes (180s) to reassure user of active 24/7 scanning
+      if (this.secondsCounter % 180 === 0) {
+        const activeCount = this.state.watchlist.filter(w => w.active).length;
+        const statusText = this.state.autoTradingActive ? 'PORNIT (24/7)' : 'OPRIT (Standby)';
+        const posText = this.state.positions.length > 0 ? `${this.state.positions.length} poziții active` : 'nicio poziție deschisă';
+        this.addLog(`[PULS AUTOMAT 24/7 💓] Engine activ | Monitorizare ${activeCount} perechi (${posText}). Stare Auto-Trading: ${statusText}.`, 'info');
+      }
+
       await this.pollTelegramMessages();
 
       this.savePersistedState();
@@ -1697,6 +1705,32 @@ class ServerBotEngine {
         }
       }
     }
+  }
+
+  public triggerPulseCheck() {
+    const now = Date.now();
+    const lastCheckTime = this.state.lastCheckAt ? new Date(this.state.lastCheckAt).getTime() : now;
+    const secondsAgo = Math.max(0, Math.floor((now - lastCheckTime) / 1000));
+    const activeCount = this.state.watchlist.filter(w => w.active).length;
+    const uptimeSeconds = Math.floor((now - new Date(this.state.serverStartedAt || now).getTime()) / 1000);
+
+    const logMsg = `[PULS VERIFICAT 💓] Server Trading Engine este 100% ACTIV (24/7)! Uptime: ${Math.floor(uptimeSeconds / 60)} min | Ultima scanare: acum ${secondsAgo}s pe ${activeCount} perechi. Mode: ${this.state.binanceMode.toUpperCase()} | Auto-Trading: ${this.state.autoTradingActive ? 'PORNIT' : 'OPRIT'}.`;
+    
+    this.addLog(logMsg, 'success');
+    this.savePersistedState();
+
+    return {
+      active: true,
+      lastCheckAt: this.state.lastCheckAt,
+      secondsAgo,
+      uptimeSeconds,
+      autoTradingActive: this.state.autoTradingActive,
+      binanceMode: this.state.binanceMode,
+      activeCount,
+      positionsCount: this.state.positions.length,
+      calculatedEquity: this.calculateEquity(),
+      message: `✅ Server Trading Engine este 100% ACTIV (24/7). Ultima scanare a avut loc acum ${secondsAgo} secunde.`
+    };
   }
 }
 

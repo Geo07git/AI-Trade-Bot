@@ -137,6 +137,7 @@ export default function App() {
             testnetApiKey: data.testnetApiKey || currentStore.testnetApiKey,
             testnetApiSecret: data.testnetApiSecret || currentStore.testnetApiSecret,
             binanceMode: data.binanceMode || currentStore.binanceMode,
+            lastCheckAt: data.lastCheckAt || currentStore.lastCheckAt || null,
           });
         }
       } catch (err) {

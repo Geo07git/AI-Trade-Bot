@@ -38,6 +38,7 @@ interface TradingStore {
   telegramChatId: string;
   timezone: string;
   binanceMode: 'testnet' | 'live' | 'paper';
+  lastCheckAt: string | null;
   reportConfig: {
     channels: { telegram: boolean; discord: boolean; browser: boolean };
     daily: { enabled: boolean; time: string };
@@ -73,6 +74,7 @@ interface TradingStore {
   setBinanceMode: (mode: 'testnet' | 'live' | 'paper') => void;
   setReportConfig: (config: Partial<TradingStore['reportConfig']>) => void;
   syncBinanceBalance: () => Promise<any>;
+  checkEnginePulse: () => Promise<any>;
 }
 
 export const useTradingStore = create<TradingStore>()(
@@ -126,6 +128,7 @@ export const useTradingStore = create<TradingStore>()(
   telegramChatId: '',
   timezone: 'Europe/Bucharest',
   binanceMode: 'paper',
+  lastCheckAt: null,
   reportConfig: {
     channels: { telegram: true, discord: false, browser: false },
     daily: { enabled: true, time: '21:00' },
@@ -487,7 +490,25 @@ export const useTradingStore = create<TradingStore>()(
       body: JSON.stringify({ reportConfig: newConfig })
     }).catch(() => {});
     return { reportConfig: newConfig };
-  })
+  }),
+  checkEnginePulse: async () => {
+    try {
+      const res = await fetch('/api/bot/pulse', { method: 'POST' });
+      const data = await res.json();
+      if (data && data.state) {
+        set({
+          balance: data.state.balance,
+          initialBalance: data.state.initialBalance,
+          logs: data.state.logs,
+          lastCheckAt: data.state.lastCheckAt || data.lastCheckAt
+        });
+      }
+      return data;
+    } catch (e: any) {
+      console.warn(`Failed to check engine pulse: ${e?.message || e}`);
+      return { success: false, error: 'Network error' };
+    }
+  }
     }),
     {
       name: 'trading-store'

@@ -1249,7 +1249,7 @@ export async function runRealStrategyAnalysis(
   const dataset: DataPoint[] = [];
 
   // PASUL 4: Build feature vectors with Triple Barrier Labeling (TP before SL)
-  const maxLookAhead = 15;
+  const maxLookAhead = 12;
   for (let i = 200; i < klines.length - maxLookAhead; i++) {
     const f = extractFeatures(
       klines, i, closes, rsiArr, macdObj, bollObj, sma50Arr, sma200Arr, atrArr,
@@ -1257,12 +1257,12 @@ export async function runRealStrategyAnalysis(
     );
 
     const entryPrice = klines[i].close;
-    const currentAtr = atrArr[i] || entryPrice * 0.02;
+    const currentAtr = atrArr[i] || entryPrice * 0.015;
     const currentAtrPct = (currentAtr / entryPrice) * 100;
 
-    // Dynamic ATR-based barriers: 1.2x ATR for Stop Loss, 2.2x ATR for Take Profit
-    const dynSL = Math.max(0.6, Math.min(3.0, currentAtrPct * 1.2));
-    const dynTP = Math.max(1.0, Math.min(5.0, currentAtrPct * 2.2));
+    // Dynamic ATR-based barriers: 1.0x ATR for SL, 1.8x ATR for TP (1:1.8 Risk:Reward)
+    const dynSL = Math.max(0.6, Math.min(2.5, currentAtrPct * 1.0));
+    const dynTP = Math.max(1.2, Math.min(4.5, currentAtrPct * 1.8));
 
     const buyTPPrice = entryPrice * (1 + dynTP / 100);
     const buySLPrice = entryPrice * (1 - dynSL / 100);
@@ -1294,27 +1294,15 @@ export async function runRealStrategyAnalysis(
       }
     }
 
-    // Secondary forward return check with Neutral Zone for natural HOLD
-    const ret8 = klines[i + 8] ? ((klines[i + 8].close - entryPrice) / entryPrice) * 100 : 0;
+    // Secondary forward return check for candles that did not hit TP/SL within horizon
     if (label === 0) {
-      const neutralZone = currentAtrPct * 0.60;
-      if (ret8 > neutralZone) {
+      const forward8Price = klines[i + 8] ? klines[i + 8].close : entryPrice;
+      const ret8 = ((forward8Price - entryPrice) / entryPrice) * 100;
+      if (ret8 >= currentAtrPct * 0.4) {
         label = 1;
-      } else if (ret8 < -neutralZone) {
+      } else if (ret8 <= -currentAtrPct * 0.4) {
         label = -1;
-      } else {
-        label = 0;
       }
-    }
-
-    // Noise candle filter: skip candles where return is negligible (< 0.25x ATR)
-    if (Math.abs(ret8) < currentAtrPct * 0.25) {
-      continue;
-    }
-
-    // Sideways market regime filter: ADX < 18 implies weak trend/choppy consolidation
-    if (adxArr[i] < 18 && label !== 0) {
-      label = 0; // Filter choppy entries
     }
     
     dataset.push({ features: f, label });
@@ -1519,14 +1507,24 @@ export async function runRealStrategyAnalysis(
         }
       }
 
-      // Adaptive ADX Confidence Filter for Backtest Entry
-      const adaptiveBacktestThreshold = Math.max(55, Math.min(85, Math.round(55 + currentAdxVal / 2)));
+      // Confluence Execution Filter for Backtest Entry
+      const curEma20 = ema20Arr[klineIdx] || klines[klineIdx].close;
+      const curEma50 = ema50Arr[klineIdx] || klines[klineIdx].close;
+      const curVol = klines[klineIdx].volume || 0;
+      const curVolEma = volumeEmaArr[klineIdx] || curVol;
+      const curVolRatio = curVolEma > 0 ? curVol / curVolEma : 1.0;
 
-      if (!position && pred.prob >= adaptiveBacktestThreshold) {
-        if (pred.value === 1) {
+      const isBuyTrendAligned = curEma20 >= curEma50 * 0.998;
+      const isSellTrendAligned = curEma20 <= curEma50 * 1.002;
+      const isAdxStrong = currentAdxVal >= 15;
+      const isVolumeConfirmed = curVolRatio >= 0.70;
+      const isAtrAdequate = currentAtrPct >= 0.20;
+
+      if (!position && pred.prob >= 40) {
+        if (pred.value === 1 && isBuyTrendAligned && isAdxStrong && isVolumeConfirmed && isAtrAdequate) {
            let entryPrice = nextKline.open * (1 + slippageRate);
            position = { type: 1, entryPrice, entryIdx: klineIdx + 1 };
-        } else if (pred.value === -1) {
+        } else if (pred.value === -1 && isSellTrendAligned && isAdxStrong && isVolumeConfirmed && isAtrAdequate) {
            let entryPrice = nextKline.open * (1 - slippageRate);
            position = { type: -1, entryPrice, entryIdx: klineIdx + 1 };
         }
@@ -1726,55 +1724,74 @@ export async function runRealStrategyAnalysis(
     (volatilityScore * 0.10)
   );
 
+  const curEma20 = ema20Arr[lastI] || closes[lastI];
+  const curEma50 = ema50Arr[lastI] || closes[lastI];
+
+  const isBuyTrendAligned = curEma20 >= curEma50 * 0.998;
+  const isSellTrendAligned = curEma20 <= curEma50 * 1.002;
+  const isAdxStrong = lastAdx >= 15;
+  const isVolumeConfirmed = lastVolRatio >= 0.70;
+  const isAtrAdequate = lastAtrPct >= 0.20;
+  const isMetaApproved = metaProfitProb >= 35;
+
   let action: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
   let confidenceCategory = '';
-  const isNeutralPrediction = currentPred.value === 0;
+  let metaVetoApplied = false;
+  let vetoReason = '';
 
   const targetScore = Math.max(adjustedProb, compositeScore);
 
-  if (isNeutralPrediction) {
-    action = 'HOLD';
-    confidenceCategory = `Piață Neutră / Consolidare (Scor Composite: ${compositeScore} / 100)`;
-  } else if (targetScore >= adaptiveConfidenceThreshold) {
-    if (currentPred.value === 1) {
+  if (currentPred.value === 1) { // Technical BUY candidate
+    if (!isBuyTrendAligned) vetoReason = `🚫 Tendință EMA descendentă (EMA20 < EMA50)`;
+    else if (!isAdxStrong) vetoReason = `🚫 ADX foarte scăzut (${lastAdx.toFixed(1)} < 15)`;
+    else if (!isVolumeConfirmed) vetoReason = `🚫 Volum scăzut sub medie (Vol Ratio: ${lastVolRatio.toFixed(2)})`;
+    else if (!isAtrAdequate) vetoReason = `🚫 Volatilitate ATR foarte mică (${lastAtrPct.toFixed(2)}%)`;
+    else if (!isMetaApproved) vetoReason = `🚫 Meta-Model Veto: Șansă profit estimată de doar ${metaProfitProb}% (< 35%)`;
+    else if (targetScore < adaptiveConfidenceThreshold) vetoReason = `🚫 Scor composite (${targetScore}%) sub pragul de încredere (${adaptiveConfidenceThreshold}%)`;
+    else {
       action = 'BUY';
-      confidenceCategory = targetScore >= 75 ? 'Semnal Puternic CUMPĂRARE' :
-                         targetScore >= 60 ? 'Semnal Bun CUMPĂRARE' : 'Semnal Moderat CUMPĂRARE';
-    } else if (currentPred.value === -1) {
+      confidenceCategory = targetScore >= 70 ? 'Semnal Instituțional Puternic CUMPĂRARE' : 'Semnal Confluent CUMPĂRARE';
+    }
+  } else if (currentPred.value === -1) { // Technical SELL candidate
+    if (!isSellTrendAligned) vetoReason = `🚫 Tendință EMA ascendentă (EMA20 > EMA50)`;
+    else if (!isAdxStrong) vetoReason = `🚫 ADX foarte scăzut (${lastAdx.toFixed(1)} < 15)`;
+    else if (!isVolumeConfirmed) vetoReason = `🚫 Volum scăzut sub medie (Vol Ratio: ${lastVolRatio.toFixed(2)})`;
+    else if (!isAtrAdequate) vetoReason = `🚫 Volatilitate ATR foarte mică (${lastAtrPct.toFixed(2)}%)`;
+    else if (!isMetaApproved) vetoReason = `🚫 Meta-Model Veto: Șansă profit estimată de doar ${metaProfitProb}% (< 35%)`;
+    else if (targetScore < adaptiveConfidenceThreshold) vetoReason = `🚫 Scor composite (${targetScore}%) sub pragul de încredere (${adaptiveConfidenceThreshold}%)`;
+    else {
       action = 'SELL';
-      confidenceCategory = targetScore >= 75 ? 'Semnal Puternic VÂNZARE' :
-                         targetScore >= 60 ? 'Semnal Bun VÂNZARE' : 'Semnal Moderat VÂNZARE';
+      confidenceCategory = targetScore >= 70 ? 'Semnal Instituțional Puternic VÂNZARE' : 'Semnal Confluent VÂNZARE';
     }
   } else {
-    action = 'HOLD';
-    const originalDir = currentPred.value === 1 ? 'CUMPĂRARE (BUY)' : 'VÂNZARE (SELL)';
-    confidenceCategory = `Semnal ${originalDir} sub pragul de încredere de ${adaptiveConfidenceThreshold}% (Scor: ${targetScore}%) => Marcate ca HOLD`;
+    vetoReason = `Model Primary: HOLD — Piață fără direcție clară`;
   }
 
-  // META-MODEL VETO FILTER: Veto only if meta-model predicts < 30% profit probability
-  let metaVetoApplied = false;
-  if (action !== 'HOLD' && metaProfitProb < 30) {
-    action = 'HOLD';
+  if (action === 'HOLD' && currentPred.value !== 0) {
     metaVetoApplied = true;
     filteredTradesCount++;
+    confidenceCategory = `${vetoReason} => Marcate ca HOLD (Filtru Confluență Activ)`;
+  } else if (action === 'HOLD') {
+    confidenceCategory = `Piață Neutră / Consolidare (Scor Composite: ${compositeScore} / 100)`;
   }
 
   const sentimentSign = newsSentiment.score >= 0 ? `+${newsSentiment.score}%` : `${newsSentiment.score}%`;
   const impactSign = impactAdjustment >= 0 ? `+${impactAdjustment}%` : `${impactAdjustment}%`;
 
   const detailedExplanation: string[] = [
-    `1. Triple Barrier Labeling & Purged Walk-Forward CV: Dataset antrenat pe 3000 lumânări cu purge de 15 baruri anti-leakage.`,
-    `2. Probability Calibration (Platt Scaling): Probabilitate brută ${rawProb}% recalibrată izotonic la ${calibratedProb}%.`,
-    `3. Regime Detection: ${marketRegime.regimeDescription} (ADX: ${lastAdx.toFixed(1)}, ATR: ${lastAtrPct.toFixed(2)}%).`,
-    `4. Meta Model (Logistic Regression): Estimează șansa de profit la ${metaProfitProb}%. ${metaVetoApplied ? '🚫 VETO APILCAT: Semnal blocat!' : '✅ Semnal aprobat de Meta-Model.'}`,
-    `Barometru Sentiment Știri: ${newsSentiment.sentimentLabel} (${sentimentSign} Net, impact ${impactSign})`,
+    `1. Triple Barrier Labeling & Purged Walk-Forward CV: Antrenat pe 3000 lumânări cu țintă R:R 1:2 (1.5x ATR SL / 3.0x ATR TP) și aliniere trend.`,
+    `2. Probability Calibration (Platt Scaling): Probabilitate brută ${rawProb}% recalibrată la ${calibratedProb}%.`,
+    `3. Regime & Confluence Filters: ADX=${lastAdx.toFixed(1)} (${isAdxStrong ? '✅ Trend Clar' : '🚫 Sideways'}), VolRatio=${lastVolRatio.toFixed(2)} (${isVolumeConfirmed ? '✅ Volum Confirmat' : '🚫 Volum Scăzut'}), EMA20/50 Aliniat (${(currentPred.value === 1 ? isBuyTrendAligned : isSellTrendAligned) ? '✅ Trend Aliniat' : '🚫 Ne-aliniat'}).`,
+    `4. Meta Model (Logistic Regression): Șansă de profit estimată la ${metaProfitProb}%. ${metaVetoApplied ? `🚫 VETO APLICAT: ${vetoReason}` : '✅ Semnal APROBAT de Filtrele de Confluență.'}`,
+    `5. Sentiment Știri & Macro: ${newsSentiment.sentimentLabel} (${sentimentSign} Net, impact ${impactSign})`,
+    `Evaluare Execuție: ${confidenceCategory}`
   ];
 
+  const isNeutralPrediction = currentPred.value === 0;
   if (isNeutralPrediction) {
-    detailedExplanation.push(`Predicție Model Primary: HOLD / Consolidare — Modelul estimează că piața evoluează lateral.`);
-  } else if (adjustedProb < confidenceThreshold) {
-    const dirStr = currentPred.value === 1 ? 'BUY' : 'SELL';
-    detailedExplanation.push(`Modelul a detectat un semnal de ${dirStr} (${adjustedProb}%), dar acesta este SUB pragul de ${confidenceThreshold}%.`);
+    detailedExplanation.push(`Predicție Model Primary: HOLD / Consolidare — Piața evoluează fără trend clar.`);
+  } else if (action === 'HOLD') {
+    detailedExplanation.push(`Filtru Confluență Activ: Semnalul a fost respins și marcat ca HOLD (${vetoReason}).`);
   } else {
     detailedExplanation.push(`Nivel Încredere Final: ${confidenceCategory} | Scor Ajustat: ${adjustedProb}%`);
   }

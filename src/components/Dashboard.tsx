@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { useTradingStore } from '../store';
 import { fetchLivePrice, fetchChartData } from '../services/api';
-import { ArrowUpRight, ArrowDownRight, Wallet, TrendingUp, AlertTriangle, Trash2, Newspaper, ExternalLink, RefreshCw, ShoppingCart, ArrowUpCircle, ArrowDownCircle, Zap, CheckCircle2 } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Wallet, TrendingUp, AlertTriangle, Trash2, Newspaper, ExternalLink, RefreshCw, ShoppingCart, ArrowUpCircle, ArrowDownCircle, Zap, CheckCircle2, Activity, Clock, Heart, Radio } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { NewsArticle } from '../types';
@@ -26,11 +26,42 @@ export function Dashboard() {
     setAutoTradingActive, 
     binanceMode, 
     syncBinanceBalance,
-    executeTrade
+    executeTrade,
+    lastCheckAt,
+    checkEnginePulse,
+    analysisInterval
   } = useTradingStore();
 
   const [newSymbol, setNewSymbol] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [secondsSinceCheck, setSecondsSinceCheck] = useState<number>(0);
+  const [isCheckingPulse, setIsCheckingPulse] = useState(false);
+  const [pulseBannerMessage, setPulseBannerMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const updateTicker = () => {
+      if (!lastCheckAt) {
+        setSecondsSinceCheck(0);
+        return;
+      }
+      const diff = Math.max(0, Math.floor((Date.now() - new Date(lastCheckAt).getTime()) / 1000));
+      setSecondsSinceCheck(diff);
+    };
+
+    updateTicker();
+    const timer = setInterval(updateTicker, 1000);
+    return () => clearInterval(timer);
+  }, [lastCheckAt]);
+
+  const handleCheckPulse = async () => {
+    setIsCheckingPulse(true);
+    const result = await checkEnginePulse();
+    setIsCheckingPulse(false);
+    if (result && result.message) {
+      setPulseBannerMessage(result.message);
+      setTimeout(() => setPulseBannerMessage(null), 8000);
+    }
+  };
   
   const [activeChartId, setActiveChartId] = useState('PORTFOLIO');
   const [assetChartData, setAssetChartData] = useState<{time: string, value: number}[]>([]);
@@ -251,6 +282,17 @@ export function Dashboard() {
             </button>
           )}
 
+          <button
+            type="button"
+            disabled={isCheckingPulse}
+            onClick={handleCheckPulse}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold bg-cyan-500/10 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/20 transition-all cursor-pointer shadow-sm shrink-0 disabled:opacity-50"
+            title="Verifică conexiunea și activitatea buclei serverului în timp real"
+          >
+            <Activity className={cn("w-3.5 h-3.5 text-cyan-400", isCheckingPulse ? "animate-spin" : "animate-pulse")} />
+            <span>{isCheckingPulse ? "Verificare..." : "Ia Pulsul Engine 💓"}</span>
+          </button>
+
           <button 
             onClick={() => setAutoTradingActive(!autoTradingActive)}
             className={cn(
@@ -279,6 +321,80 @@ export function Dashboard() {
       </header>
 
       <div className="p-8 overflow-y-auto flex-1 space-y-6">
+        {/* Live Engine Pulse & Heartbeat Indicator Card */}
+        <div className="bg-gradient-to-r from-zinc-900/90 via-zinc-900/80 to-zinc-950 border border-cyan-500/30 rounded-2xl p-5 shadow-lg backdrop-blur-md relative overflow-hidden">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-3 border-b border-white/5">
+            <div className="flex items-center gap-3">
+              <div className="relative flex h-3.5 w-3.5 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-cyan-500"></span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center gap-1.5">
+                    <Activity className="w-4 h-4 text-cyan-400 animate-pulse" />
+                    Puls Engine 24/7 — Verificare Stare Server
+                  </h3>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-mono">
+                    ONLINE 24/7
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Verifică în orice moment că bucla de scanare a serverului rulează activ în fundal fără întreruperi.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={isCheckingPulse}
+              onClick={handleCheckPulse}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-cyan-500 text-black hover:bg-cyan-400 transition-all font-mono shadow-md cursor-pointer disabled:opacity-50 shrink-0"
+            >
+              <Activity className={cn("w-4 h-4", isCheckingPulse && "animate-spin")} />
+              <span>{isCheckingPulse ? "Se verifică Serverul..." : "💓 Ia Pulsul Acum"}</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 text-xs font-mono">
+            <div className="p-3 bg-zinc-950/70 border border-white/5 rounded-xl">
+              <span className="text-[10px] uppercase text-zinc-500 block mb-1">Ultima Verificare Server</span>
+              <p className="text-sm font-semibold text-cyan-300 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                {secondsSinceCheck === 0 ? "ACUM (Sub 1s)" : `Acum ${secondsSinceCheck}s`}
+              </p>
+            </div>
+
+            <div className="p-3 bg-zinc-950/70 border border-white/5 rounded-xl">
+              <span className="text-[10px] uppercase text-zinc-500 block mb-1">Stare Buclă Fundal</span>
+              <p className="text-sm font-semibold text-emerald-400 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+                {autoTradingActive ? "AUTO-TRADING ACTIV" : "STANDBY (Monitorizare)"}
+              </p>
+            </div>
+
+            <div className="p-3 bg-zinc-950/70 border border-white/5 rounded-xl">
+              <span className="text-[10px] uppercase text-zinc-500 block mb-1">Frecvență Scanare ML</span>
+              <p className="text-sm font-semibold text-zinc-200">
+                La fiecare {analysisInterval || 60} secunde
+              </p>
+            </div>
+
+            <div className="p-3 bg-zinc-950/70 border border-white/5 rounded-xl">
+              <span className="text-[10px] uppercase text-zinc-500 block mb-1">Perechi Monitorizate</span>
+              <p className="text-sm font-semibold text-zinc-200">
+                {watchlist.filter(w => w.active).length} perechi crypto
+              </p>
+            </div>
+          </div>
+
+          {pulseBannerMessage && (
+            <div className="mt-3 p-3 bg-cyan-950/90 border border-cyan-500/50 rounded-xl text-xs text-cyan-200 flex items-center gap-2 animate-fadeIn">
+              <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />
+              <span className="font-mono">{pulseBannerMessage}</span>
+            </div>
+          )}
+        </div>
         {/* Sequential Launch Circuit Banner */}
         <div className="bg-zinc-900/80 border border-emerald-500/20 rounded-2xl p-5 backdrop-blur-sm">
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-white/5">
