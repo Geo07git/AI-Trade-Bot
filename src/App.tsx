@@ -121,6 +121,8 @@ export default function App() {
             initialBalance: data.initialBalance ?? data.balance,
             positions: data.positions,
             logs: data.logs,
+            signalJournal: data.signalJournal || [],
+            tradeHistory: data.tradeHistory || [],
             watchlist: data.watchlist,
             autoTradingActive: data.autoTradingActive,
             circuitBreakerTriggered: !!data.circuitBreakerTriggered,

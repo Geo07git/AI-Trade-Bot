@@ -176,6 +176,74 @@ export function UserGuide() {
             </div>
           </section>
 
+          {/* Troubleshooting / Depanare Section */}
+          <section className="bg-zinc-900/50 border border-amber-500/20 rounded-2xl p-8 hover:border-amber-500/40 transition-colors">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-400 font-bold font-mono text-sm">
+                FIX
+              </div>
+              <div>
+                <h2 className="font-serif text-2xl text-white">Ghid de Depanare & Troubleshooting Server 24/7</h2>
+                <p className="text-xs text-amber-400 font-mono mt-0.5">Procedură pas cu pas dacă motorul Pulse Engine se oprește sau toate semnalele indică HOLD</p>
+              </div>
+            </div>
+
+            <p className="text-zinc-400 font-sans leading-relaxed text-sm mb-6">
+              Dacă observi că motorul Server 24/7 nu mai emite loguri noi, toate evaluările de pe piețe rămân blocate pe <code>HOLD</code> sau indicatorul de puls este inactiv, urmează această fișă de verificare rapidă:
+            </p>
+
+            <div className="space-y-6">
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0 border border-amber-500/20 text-amber-400 font-serif font-bold">1</div>
+                <div>
+                  <h3 className="font-serif text-lg text-amber-300 mb-1">Verificare Circuit Breaker de Siguranță</h3>
+                  <p className="text-sm text-zinc-400 font-sans leading-relaxed">
+                    <strong>Cauză:</strong> Când portofoliul înregistrează o pierdere de -5% sau un profit de +10%, sistemul oprește automat tranzacționarea automată (Auto-Trading) pentru protecția capitalului.
+                    <br /><strong>Soluție:</strong> Mergi pe Dashboard și apasă butonul <strong>"Reset Circuit Breaker" / "Reluare Manual Trade"</strong> sau trimite comanda <code>/resume</code> pe botul de Telegram.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center shrink-0 border border-blue-500/20 text-blue-400 font-serif font-bold">2</div>
+                <div>
+                  <h3 className="font-serif text-lg text-blue-300 mb-1">Repornire Pulse Engine (Toggle OFF/ON)</h3>
+                  <p className="text-sm text-zinc-400 font-sans leading-relaxed">
+                    <strong>Cauză:</strong> Conexiunea WebSocket sau intervalul timer-ului din background a fost întrerupt temporar din cauza rețelei Binance.
+                    <br /><strong>Soluție:</strong> În bara superioară, apasă comutatorul <strong>"Server 24/7"</strong> pe <em>OFF</em> (Dezactivat), așteaptă 3 secunde, apoi comută-l înapoi pe <em>ON</em>. Această acțiune reinițializează timer-ul backend și forțează o scanare instantanee a tuturor simbolurilor.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-rose-500/10 flex items-center justify-center shrink-0 border border-rose-500/20 text-rose-400 font-serif font-bold">3</div>
+                <div>
+                  <h3 className="font-serif text-lg text-rose-300 mb-1">De Ce Toate Semnalele Arată -HOLD-?</h3>
+                  <p className="text-sm text-zinc-400 font-sans leading-relaxed">
+                    <strong>Cauză:</strong> Acesta nu este o eroare, ci comportamentul normal al <strong>Filtrului de Confluență ML</strong>. Botul nu cumpără la întâmplare; el aprobă o tranzacție doar dacă:
+                    <br />• Scorul Random Forest depășește pragul de încredere configurat (ex: &ge; 55%–60%).
+                    <br />• Meta-Modelul nu detectează un risc de manipulare sau volatilitate extremă.
+                    <br />• Volumul pieței este suficient de ridicat și regimul de piață este compatibil.
+                    <br /><strong>Verificare:</strong> Deschide tab-ul <strong>Decision & Audit Journal</strong> &gt; <em>"Jurnal Audit Semnale AI"</em> și apasă butonul <strong>Explicare</strong> pentru a vedea motivul exact pentru care un simbol a primit VETO.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0 border border-emerald-500/20 text-emerald-400 font-serif font-bold">4</div>
+                <div>
+                  <h3 className="font-serif text-lg text-emerald-300 mb-1">Diagnosticare API Endpoint / Server State</h3>
+                  <p className="text-sm text-zinc-400 font-sans leading-relaxed">
+                    Dacă rulezi aplicația pe propriul VPS sau mașină locală și vrei să inspectezi starea internă a serverului Node.js:
+                    <br />• Deschide în browser linkul: <code>/api/bot/state</code> (ex: <code>http://localhost:3000/api/bot/state</code>).
+                    <br />• Verifică dacă câmpul <code>autoTradingActive</code> este <code>true</code> și verifică valoarea <code>lastCheckAt</code>.
+                    <br />• În terminalul VPS, poți reporni serviciul prin comanda: <code>pm2 restart ai-trade</code> sau prin repornirea procesului <code>npm start</code>.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <section className="bg-zinc-900/50 border border-white/5 rounded-2xl p-8 hover:border-white/10 transition-colors mt-8">
             <h2 className="font-serif text-2xl text-white mb-6">Instalare & Export</h2>
             

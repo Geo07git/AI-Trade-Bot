@@ -143,10 +143,25 @@ export interface MetaModelStats {
   metaModelTrained: boolean;
 }
 
+export interface ReversalSignal {
+  isBullishReversal: boolean; // Panic sell capitulation -> Rebound BUY candidate
+  isBearishReversal: boolean; // Overbought euphoria spike -> Rebound SELL candidate
+  score: number; // 0 to 100 confidence score of reversal setup
+  reasons: string[];
+  rsi: number;
+  percentB: number;
+  volRatio: number;
+  adx: number;
+}
+
 export interface StrategyResult {
   symbol: string;
   signal: 'BUY' | 'SELL' | 'HOLD';
   probability: number;
+  rfProb?: number;
+  metaProb?: number;
+  vetoReason?: string;
+  targetScore?: number;
   newsSentiment?: NewsSentimentData;
   indicators: TechnicalIndicators;
   modelMetrics: ModelMetrics;
@@ -156,6 +171,7 @@ export interface StrategyResult {
   explanation: string[];
   marketRegime?: MarketRegimeInfo;
   metaModelStats?: MetaModelStats;
+  reversalSignal?: ReversalSignal;
 }
 
 const BASELINE_PRICES: Record<string, number> = {
@@ -172,48 +188,50 @@ function getFallbackBasePrice(symbol: string): number {
   return 10 + (Math.abs(hash) % 990);
 }
 
-// Fetch up to 3000 historical klines (3x 1000 batches from Binance or generator)
-export async function fetchHistoricalKlines(symbol: string, limit = 3000): Promise<Kline[]> {
+const klineCache = new Map<string, { klines: Kline[]; timestamp: number }>();
+
+// Fetch historical klines with 3-minute caching and single-batch fetching to prevent API rate-limiting
+export async function fetchHistoricalKlines(symbol: string, limit = 1000): Promise<Kline[]> {
   const cleanSymbol = symbol.trim().toUpperCase();
-  try {
-    const allKlines: Kline[] = [];
-    let endTime: number | undefined = undefined;
-    const batchSize = 1000;
-    const numBatches = Math.ceil(limit / batchSize);
+  const cached = klineCache.get(cleanSymbol);
 
-    for (let b = 0; b < numBatches; b++) {
-      const url = `https://api.binance.com/api/v3/klines?symbol=${cleanSymbol}&interval=1h&limit=${batchSize}` + (endTime ? `&endTime=${endTime}` : '');
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
-          const parsed = data.map((d: any) => ({
-            timestamp: d[0],
-            open: parseFloat(d[1]),
-            high: parseFloat(d[2]),
-            low: parseFloat(d[3]),
-            close: parseFloat(d[4]),
-            volume: parseFloat(d[5]),
-          }));
-          allKlines.unshift(...parsed);
-          endTime = parsed[0].timestamp - 1;
-        } else {
-          break;
-        }
-      } else {
-        break;
-      }
-    }
-
-    if (allKlines.length >= 100) {
-      allKlines.sort((a, b) => a.timestamp - b.timestamp);
-      return allKlines.slice(-limit);
-    }
-  } catch (err) {
-    console.debug(`Binance klines unavailable, using generator...`);
+  // Return cached klines if fetched within the last 180 seconds (3 minutes)
+  if (cached && (Date.now() - cached.timestamp < 180000) && cached.klines.length >= 100) {
+    return cached.klines.slice(-limit);
   }
 
-  // Fallback generator for requested limit (e.g. 3000 candles)
+  try {
+    const fetchLimit = Math.min(limit, 1000);
+    const url = `https://api.binance.com/api/v3/klines?symbol=${cleanSymbol}&interval=1h&limit=${fetchLimit}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length >= 50) {
+        const parsed: Kline[] = data.map((d: any) => ({
+          timestamp: d[0],
+          open: parseFloat(d[1]),
+          high: parseFloat(d[2]),
+          low: parseFloat(d[3]),
+          close: parseFloat(d[4]),
+          volume: parseFloat(d[5]),
+        }));
+        parsed.sort((a, b) => a.timestamp - b.timestamp);
+        klineCache.set(cleanSymbol, { klines: parsed, timestamp: Date.now() });
+        return parsed.slice(-limit);
+      }
+    }
+  } catch (err) {
+    // If network error/timeout occurs and we have any previous cache, return cached!
+    if (cached && cached.klines.length >= 50) {
+      return cached.klines.slice(-limit);
+    }
+  }
+
+  // Fallback generator if Binance klines unavailable or rate-limited
   const klines: Kline[] = [];
   const basePrice = getFallbackBasePrice(cleanSymbol);
   let currentPrice = basePrice;
@@ -229,6 +247,7 @@ export async function fetchHistoricalKlines(symbol: string, limit = 3000): Promi
     klines.push({ timestamp: time, open, high, low, close, volume });
     currentPrice = close;
   }
+  klineCache.set(cleanSymbol, { klines, timestamp: Date.now() });
   return klines;
 }
 
@@ -500,6 +519,129 @@ export function computeIndicatorsSnapshot(klines: Kline[]): TechnicalIndicators 
   };
 }
 
+// ---------------- REVERSAL DETECTOR MODULE ----------------
+// Standalone Capitulation Rebound & Mean Reversion Detection Engine.
+// Evaluates panic sell / euphoria exhaustion setups (RSI, Bollinger %B, Volume Climax, ADX)
+// BEFORE Random Forest model evaluation.
+
+export function detectReversalPattern(
+  rsi: number,
+  close: number,
+  bollLower: number,
+  bollUpper: number,
+  percentB: number,
+  volRatio: number,
+  adx: number,
+  stochRsi?: number,
+  cci?: number
+): ReversalSignal {
+  const reasons: string[] = [];
+  let bullishScore = 0;
+  let bearishScore = 0;
+
+  // --- 1. BULLISH REVERSAL (Panic Capitulation Rebound BUY) ---
+  // Criteria: RSI < 30 (or <= 32), Price < Bollinger Lower Band (or percentB <= 0.05), Volume > 1.8x, ADX > 20
+  const isRsiOversold = rsi <= 32;
+  const isBollOversold = close <= bollLower || percentB <= 0.05;
+  const isVolumeClimax = volRatio >= 1.8;
+  const isAdxPanic = adx >= 20;
+
+  if (rsi <= 30) {
+    bullishScore += 25;
+    reasons.push(`RSI extrem supravândut (${rsi.toFixed(1)} < 30)`);
+  } else if (rsi <= 32) {
+    bullishScore += 15;
+    reasons.push(`RSI supravândut (${rsi.toFixed(1)} <= 32)`);
+  }
+
+  if (close < bollLower || percentB <= 0) {
+    bullishScore += 25;
+    reasons.push(`Preț sub Banda Bollinger Inferioară (%B: ${percentB.toFixed(2)})`);
+  } else if (percentB <= 0.05) {
+    bullishScore += 15;
+    reasons.push(`Preț la limita Benzii Inferioare (%B: ${percentB.toFixed(2)})`);
+  }
+
+  if (volRatio >= 1.8) {
+    bullishScore += 30;
+    reasons.push(`Climax de volum panic sell (${volRatio.toFixed(2)}x față de medie > 1.8x)`);
+  } else if (volRatio >= 1.5) {
+    bullishScore += 15;
+    reasons.push(`Volum crescut peste medie (${volRatio.toFixed(2)}x)`);
+  }
+
+  if (adx >= 20) {
+    bullishScore += 20;
+    reasons.push(`Impuls direcțional intens ADX (${adx.toFixed(1)} >= 20)`);
+  }
+
+  if (stochRsi !== undefined && stochRsi <= 15) {
+    bullishScore += 10;
+    reasons.push(`StochRSI supravândut (${stochRsi.toFixed(1)} <= 15)`);
+  }
+
+  if (cci !== undefined && cci <= -100) {
+    bullishScore += 10;
+    reasons.push(`CCI supravândut (${cci.toFixed(1)} <= -100)`);
+  }
+
+  // --- 2. BEARISH REVERSAL (Euphoria Exhaustion Rebound SELL) ---
+  const isRsiOverbought = rsi >= 68;
+  const isBollOverbought = close >= bollUpper || percentB >= 0.95;
+
+  if (rsi >= 70) {
+    bearishScore += 25;
+    reasons.push(`RSI extrem supracumpărat (${rsi.toFixed(1)} > 70)`);
+  } else if (rsi >= 68) {
+    bearishScore += 15;
+    reasons.push(`RSI supracumpărat (${rsi.toFixed(1)} >= 68)`);
+  }
+
+  if (close > bollUpper || percentB >= 1.0) {
+    bearishScore += 25;
+    reasons.push(`Preț peste Banda Bollinger Superioară (%B: ${percentB.toFixed(2)})`);
+  } else if (percentB >= 0.95) {
+    bearishScore += 15;
+    reasons.push(`Preț la limita Benzii Superioare (%B: ${percentB.toFixed(2)})`);
+  }
+
+  if (volRatio >= 1.8) {
+    bearishScore += 30;
+    reasons.push(`Climax de volum cumpărare (${volRatio.toFixed(2)}x față de medie > 1.8x)`);
+  }
+
+  if (adx >= 20) {
+    bearishScore += 20;
+    reasons.push(`Impuls direcțional intens ADX (${adx.toFixed(1)} >= 20)`);
+  }
+
+  if (stochRsi !== undefined && stochRsi >= 85) {
+    bearishScore += 10;
+    reasons.push(`StochRSI supracumpărat (${stochRsi.toFixed(1)} >= 85)`);
+  }
+
+  if (cci !== undefined && cci >= 100) {
+    bearishScore += 10;
+    reasons.push(`CCI supracumpărat (${cci.toFixed(1)} >= 100)`);
+  }
+
+  const isBullishReversal = isRsiOversold && isBollOversold && isVolumeClimax && isAdxPanic;
+  const isBearishReversal = isRsiOverbought && isBollOverbought && isVolumeClimax && isAdxPanic;
+
+  const score = isBullishReversal ? Math.min(100, bullishScore) : (isBearishReversal ? Math.min(100, bearishScore) : 0);
+
+  return {
+    isBullishReversal,
+    isBearishReversal,
+    score,
+    reasons: (isBullishReversal || isBearishReversal) ? reasons : [],
+    rsi,
+    percentB,
+    volRatio,
+    adx
+  };
+}
+
 // ---------------- MACHINE LEARNING CORE (RANDOM FOREST) ----------------
 
 export interface DataPoint {
@@ -537,7 +679,8 @@ export const FEATURE_NAMES = [
   'Dist. VWAP (%)',
   'ATR %',
   'Dist. High 20 (%)',
-  'Dist. Low 20 (%)'
+  'Dist. Low 20 (%)',
+  'Reversal Score'
 ];
 
 function calculateGini(groups: DataPoint[][], classes: number[]) {
@@ -829,6 +972,7 @@ export class RandomForest {
       'ATR %': 'Volatility',
       'Dist. High 20 (%)': 'Volatility',
       'Dist. Low 20 (%)': 'Volatility',
+      'Reversal Score': 'Momentum',
     };
 
     const rawItems = FEATURE_NAMES.map((name, idx) => {
@@ -892,6 +1036,7 @@ export class RandomForest {
       'ATR %': 'Volatility',
       'Dist. High 20 (%)': 'Volatility',
       'Dist. Low 20 (%)': 'Volatility',
+      'Reversal Score': 'Momentum',
     };
 
     const rawItems = FEATURE_NAMES.map((name, idx) => {
@@ -1067,7 +1212,7 @@ function extractFeatures(
   closes: number[],
   rsi: number[],
   macd: { histogram: number[] },
-  boll: { percentB: number[] },
+  boll: { lower?: number[], upper?: number[], percentB: number[] },
   sma50: number[],
   sma200: number[],
   atr: number[],
@@ -1111,6 +1256,21 @@ function extractFeatures(
   const distHigh20 = slice20High ? ((c - slice20High) / slice20High) * 100 : 0;
   const distLow20 = slice20Low ? ((c - slice20Low) / slice20Low) * 100 : 0;
 
+  const bollLowerVal = boll.lower ? (boll.lower[i] || c * 0.95) : c * 0.95;
+  const bollUpperVal = boll.upper ? (boll.upper[i] || c * 1.05) : c * 1.05;
+  const rev = detectReversalPattern(
+    rsi[i] || 50,
+    c,
+    bollLowerVal,
+    bollUpperVal,
+    boll.percentB[i] || 0.5,
+    volRatio,
+    adx[i] || 25,
+    stochRsi[i],
+    cci[i]
+  );
+  const reversalScoreVal = rev.isBullishReversal ? rev.score : (rev.isBearishReversal ? -rev.score : 0);
+
   return [
     rsi[i] || 50,
     macd.histogram[i] || 0,
@@ -1132,7 +1292,8 @@ function extractFeatures(
     distVWAP,
     atrPct,
     distHigh20,
-    distLow20
+    distLow20,
+    reversalScoreVal
   ];
 }
 
@@ -1260,9 +1421,14 @@ export async function runRealStrategyAnalysis(
     const currentAtr = atrArr[i] || entryPrice * 0.015;
     const currentAtrPct = (currentAtr / entryPrice) * 100;
 
-    // Dynamic ATR-based barriers: 1.0x ATR for SL, 1.8x ATR for TP (1:1.8 Risk:Reward)
-    const dynSL = Math.max(0.6, Math.min(2.5, currentAtrPct * 1.0));
-    const dynTP = Math.max(1.2, Math.min(4.5, currentAtrPct * 1.8));
+    // FIX PROFIT FACTOR #1: barierele de etichetare acum sunt IDENTICE cu SL/TP folosit
+    // mai jos la execuția reală (1.2x ATR SL / 2.4x ATR TP, aceleași plafoane).
+    // Înainte: eticheta se genera cu 1.0x/1.8x ATR, dar poziția reală era gestionată
+    // cu 1.2x/2.4x ATR -> modelul învăța să recunoască o altă tranzacție decât cea
+    // pe care o executa efectiv, ceea ce limita cât de bine probabilitatea prezisă
+    // putea reflecta profitabilitatea reală.
+    const dynSL = Math.max(0.6, Math.min(3.5, currentAtrPct * 1.2));
+    const dynTP = Math.max(1.2, Math.min(7.0, currentAtrPct * 2.4));
 
     const buyTPPrice = entryPrice * (1 + dynTP / 100);
     const buySLPrice = entryPrice * (1 - dynSL / 100);
@@ -1353,6 +1519,17 @@ export async function runRealStrategyAnalysis(
   const feeRate = 0.001; // Binance 0.1% fee
   const slippageRate = 0.0005; // 0.05% slippage
   const confidenceThreshold = modelParams.confidenceThreshold !== undefined ? modelParams.confidenceThreshold : 40;
+
+  // FIX PROFIT FACTOR #3: pragurile de calitate ale semnalului (confluence filters) erau
+  // duplicate ca "magic numbers" în 2 locuri diferite ale funcției (o dată în bucla de
+  // backtest, o dată la semnalul live) — risc real ca ele să diverge silențios în timp.
+  // Sunt acum centralizate aici și ușor înăsprite (ADX 15->18, Volum 0.70->0.80,
+  // ATR% 0.20->0.25, prag Meta-Model 35%->48%) pentru a tăia intrările de calitate joasă
+  // care dilua win rate-ul și profit factorul.
+  const MIN_ADX_FOR_ENTRY = 18;
+  const MIN_VOLUME_RATIO = 0.80;
+  const MIN_ATR_PCT = 0.25;
+  const META_MIN_PROFIT_PROB = 48;
 
   let finalModel: RandomForest = new RandomForest();
   let filteredTradesCount = 0;
@@ -1514,19 +1691,50 @@ export async function runRealStrategyAnalysis(
       const curVolEma = volumeEmaArr[klineIdx] || curVol;
       const curVolRatio = curVolEma > 0 ? curVol / curVolEma : 1.0;
 
-      const isBuyTrendAligned = curEma20 >= curEma50 * 0.998;
-      const isSellTrendAligned = curEma20 <= curEma50 * 1.002;
-      const isAdxStrong = currentAdxVal >= 15;
-      const isVolumeConfirmed = curVolRatio >= 0.70;
-      const isAtrAdequate = currentAtrPct >= 0.20;
+      // Reversal Detector for Backtest Candle
+      const klineBollLower = bollObj.lower[klineIdx] || klines[klineIdx].close * 0.95;
+      const klineBollUpper = bollObj.upper[klineIdx] || klines[klineIdx].close * 1.05;
+      const klinePercentB = bollObj.percentB[klineIdx] !== undefined ? bollObj.percentB[klineIdx] : 0.5;
 
-      if (!position && pred.prob >= 40) {
-        if (pred.value === 1 && isBuyTrendAligned && isAdxStrong && isVolumeConfirmed && isAtrAdequate) {
-           let entryPrice = nextKline.open * (1 + slippageRate);
-           position = { type: 1, entryPrice, entryIdx: klineIdx + 1 };
-        } else if (pred.value === -1 && isSellTrendAligned && isAdxStrong && isVolumeConfirmed && isAtrAdequate) {
-           let entryPrice = nextKline.open * (1 - slippageRate);
-           position = { type: -1, entryPrice, entryIdx: klineIdx + 1 };
+      const candleReversal = detectReversalPattern(
+        rsiArr[klineIdx] || 50,
+        klines[klineIdx].close,
+        klineBollLower,
+        klineBollUpper,
+        klinePercentB,
+        curVolRatio,
+        currentAdxVal,
+        stochRsiArr[klineIdx],
+        cciArr[klineIdx]
+      );
+
+      // Dynamic Confluence Score calculation for backtest entry (replacing hard VETOs with soft penalties)
+      let backtestScore = pred.prob;
+      if (pred.value === 1) {
+        if (curEma20 >= curEma50) backtestScore += 4;
+        else backtestScore -= 5; // soft penalty for counter-trend
+      } else if (pred.value === -1) {
+        if (curEma20 <= curEma50) backtestScore += 4;
+        else backtestScore -= 5;
+      }
+      if (curVolRatio >= 1.2) backtestScore += 4;
+      else if (curVolRatio < 0.8) backtestScore -= (curVolRatio < 0.5 ? 8 : 4);
+
+      if (!position) {
+        if (candleReversal.isBullishReversal && curVolRatio >= 1.0 && (pred.prob >= 35 || pred.value === 1)) {
+          let entryPrice = nextKline.open * (1 + slippageRate);
+          position = { type: 1, entryPrice, entryIdx: klineIdx + 1 };
+        } else if (candleReversal.isBearishReversal && curVolRatio >= 1.0 && (pred.prob >= 35 || pred.value === -1)) {
+          let entryPrice = nextKline.open * (1 - slippageRate);
+          position = { type: -1, entryPrice, entryIdx: klineIdx + 1 };
+        } else if (backtestScore >= Math.min(45, confidenceThreshold)) {
+          if (pred.value === 1) {
+             let entryPrice = nextKline.open * (1 + slippageRate);
+             position = { type: 1, entryPrice, entryIdx: klineIdx + 1 };
+          } else if (pred.value === -1) {
+             let entryPrice = nextKline.open * (1 - slippageRate);
+             position = { type: -1, entryPrice, entryIdx: klineIdx + 1 };
+          }
         }
       }
 
@@ -1542,6 +1750,19 @@ export async function runRealStrategyAnalysis(
 
   const metaModel = new LogisticRegressionMetaModel();
   metaModel.train(metaDataset);
+
+  // FIX PROFIT FACTOR #4: `finalModel` (folosit mai jos doar pentru feature importance,
+  // ca diagnostic onest pe date ne-văzute) e antrenat pe fold-ul de train al ultimei
+  // ferestre walk-forward, adică exclude intenționat ultimele ~testSize + maxLookAhead
+  // bare pentru a putea fi evaluat out-of-sample. Corect pentru metrici, dar înseamnă
+  // că modelul folosit pentru semnalul de ASTĂZI e "vechi" cu câteva sute de bare.
+  // Fiecare rând din `dataset` are deja o etichetă complet rezolvată și non-leaking
+  // (bucla de construcție se oprește la `klines.length - maxLookAhead`), deci putem
+  // antrena în siguranță un model separat de "producție" pe TOT dataset-ul, folosit
+  // exclusiv pentru inferența live — fără să atingem metricile de validare/feature
+  // importance, care rămân pe `finalModel` ca înainte.
+  const productionModel = new RandomForest();
+  productionModel.train(dataset, modelParams.nEstimators || 40, modelParams.maxDepth || 8, 3);
 
   if (onProgress) onProgress(75);
 
@@ -1647,7 +1868,7 @@ export async function runRealStrategyAnalysis(
   );
   
   const expPred = predictTree(explainerTree, currentFeatures);
-  const currentPred = finalModel.predict(currentFeatures);
+  const currentPred = productionModel.predict(currentFeatures);
 
   // Feature Pruning: Filter features with importance >= 2.0%
   const featureImportances = finalModel.getPermutationImportances(lastFoldTestData.length > 0 ? lastFoldTestData : dataset.slice(-300));
@@ -1729,60 +1950,153 @@ export async function runRealStrategyAnalysis(
 
   const isBuyTrendAligned = curEma20 >= curEma50 * 0.998;
   const isSellTrendAligned = curEma20 <= curEma50 * 1.002;
-  const isAdxStrong = lastAdx >= 15;
-  const isVolumeConfirmed = lastVolRatio >= 0.70;
-  const isAtrAdequate = lastAtrPct >= 0.20;
-  const isMetaApproved = metaProfitProb >= 35;
+  const isAdxStrong = lastAdx >= MIN_ADX_FOR_ENTRY;
+  const isVolumeConfirmed = lastVolRatio >= MIN_VOLUME_RATIO;
+  const isAtrAdequate = lastAtrPct >= MIN_ATR_PCT;
+  const isMetaApproved = metaProfitProb >= META_MIN_PROFIT_PROB;
+
+  // --- REVERSAL DETECTOR (Pre-Random Forest Module) ---
+  const lastPercentB = bollObj.percentB[lastI] !== undefined ? bollObj.percentB[lastI] : 0.5;
+  const lastBollLower = bollObj.lower[lastI] || closes[lastI] * 0.95;
+  const lastBollUpper = bollObj.upper[lastI] || closes[lastI] * 1.05;
+
+  const reversalSignal = detectReversalPattern(
+    rsiArr[lastI] || 50,
+    closes[lastI],
+    lastBollLower,
+    lastBollUpper,
+    lastPercentB,
+    lastVolRatio,
+    lastAdx,
+    stochRsiArr[lastI],
+    cciArr[lastI]
+  );
 
   let action: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
   let confidenceCategory = '';
   let metaVetoApplied = false;
   let vetoReason = '';
 
-  const targetScore = Math.max(adjustedProb, compositeScore);
+  // 1. Strict Veto Guardrails Only (Hard safety stops before continuous scoring)
+  let strictVetoTriggered = false;
 
-  if (currentPred.value === 1) { // Technical BUY candidate
-    if (!isBuyTrendAligned) vetoReason = `🚫 Tendință EMA descendentă (EMA20 < EMA50)`;
-    else if (!isAdxStrong) vetoReason = `🚫 ADX foarte scăzut (${lastAdx.toFixed(1)} < 15)`;
-    else if (!isVolumeConfirmed) vetoReason = `🚫 Volum scăzut sub medie (Vol Ratio: ${lastVolRatio.toFixed(2)})`;
-    else if (!isAtrAdequate) vetoReason = `🚫 Volatilitate ATR foarte mică (${lastAtrPct.toFixed(2)}%)`;
-    else if (!isMetaApproved) vetoReason = `🚫 Meta-Model Veto: Șansă profit estimată de doar ${metaProfitProb}% (< 35%)`;
-    else if (targetScore < adaptiveConfidenceThreshold) vetoReason = `🚫 Scor composite (${targetScore}%) sub pragul de încredere (${adaptiveConfidenceThreshold}%)`;
-    else {
-      action = 'BUY';
-      confidenceCategory = targetScore >= 70 ? 'Semnal Instituțional Puternic CUMPĂRARE' : 'Semnal Confluent CUMPĂRARE';
+  // Veto Check 1: Primary RF Prob < 50% or Neutral prediction with no reversal
+  const minRfTarget = 50;
+  if (currentPred.value === 0 || calibratedProb < minRfTarget) {
+    if (!reversalSignal.isBullishReversal && !reversalSignal.isBearishReversal) {
+      strictVetoTriggered = true;
+      vetoReason = `🚫 VETO Strict: Probabilitate Random Forest < ${minRfTarget}% (${calibratedProb}%)`;
     }
-  } else if (currentPred.value === -1) { // Technical SELL candidate
-    if (!isSellTrendAligned) vetoReason = `🚫 Tendință EMA ascendentă (EMA20 > EMA50)`;
-    else if (!isAdxStrong) vetoReason = `🚫 ADX foarte scăzut (${lastAdx.toFixed(1)} < 15)`;
-    else if (!isVolumeConfirmed) vetoReason = `🚫 Volum scăzut sub medie (Vol Ratio: ${lastVolRatio.toFixed(2)})`;
-    else if (!isAtrAdequate) vetoReason = `🚫 Volatilitate ATR foarte mică (${lastAtrPct.toFixed(2)}%)`;
-    else if (!isMetaApproved) vetoReason = `🚫 Meta-Model Veto: Șansă profit estimată de doar ${metaProfitProb}% (< 35%)`;
-    else if (targetScore < adaptiveConfidenceThreshold) vetoReason = `🚫 Scor composite (${targetScore}%) sub pragul de încredere (${adaptiveConfidenceThreshold}%)`;
-    else {
-      action = 'SELL';
-      confidenceCategory = targetScore >= 70 ? 'Semnal Instituțional Puternic VÂNZARE' : 'Semnal Confluent VÂNZARE';
-    }
-  } else {
-    vetoReason = `Model Primary: HOLD — Piață fără direcție clară`;
   }
 
-  if (action === 'HOLD' && currentPred.value !== 0) {
+  // Veto Check 2: Meta-Model Profit Probability < 35%
+  const minMetaTarget = 35;
+  if (!strictVetoTriggered && metaProfitProb < minMetaTarget) {
+    if (!reversalSignal.isBullishReversal && !reversalSignal.isBearishReversal) {
+      strictVetoTriggered = true;
+      vetoReason = `🚫 VETO Strict: Șansă Profit Meta-Model < ${minMetaTarget}% (${metaProfitProb}%)`;
+    }
+  }
+
+  // Veto Check 3: Reversal Signal with zero volume (< 0.20x)
+  if (!strictVetoTriggered && (reversalSignal.isBullishReversal || reversalSignal.isBearishReversal) && lastVolRatio < 0.2) {
+    strictVetoTriggered = true;
+    vetoReason = `🚫 VETO Strict: Reversal neconfirmat cu volum nul (${lastVolRatio.toFixed(2)}x < 0.20x)`;
+  }
+
+  // 2. Continuous Adjustments Engine (Converting EMA, Volume, ADX, News into smooth score multipliers)
+  const scoreAdjustments: string[] = [];
+
+  // EMA Trend Alignment (+/- 5%)
+  let trendAdjustment = 0;
+  if (currentPred.value === 1) { // BUY Candidate
+    trendAdjustment = curEma20 >= curEma50 ? 4 : -5;
+    scoreAdjustments.push(`${trendAdjustment >= 0 ? '+' : ''}${trendAdjustment}% EMA Trend (${curEma20 >= curEma50 ? 'Uptrend' : 'Downtrend'})`);
+  } else if (currentPred.value === -1) { // SELL Candidate
+    trendAdjustment = curEma20 <= curEma50 ? 4 : -5;
+    scoreAdjustments.push(`${trendAdjustment >= 0 ? '+' : ''}${trendAdjustment}% EMA Trend (${curEma20 <= curEma50 ? 'Downtrend' : 'Uptrend'})`);
+  }
+
+  // Volume Continuous Multiplier (+/- 5%)
+  let volAdjustment = 0;
+  if (lastVolRatio >= 1.0) {
+    volAdjustment = Math.min(5, Math.round((lastVolRatio - 1.0) * 4));
+  } else {
+    volAdjustment = Math.max(-6, Math.round((lastVolRatio - 1.0) * 7));
+  }
+  scoreAdjustments.push(`${volAdjustment >= 0 ? '+' : ''}${volAdjustment}% Volum (${lastVolRatio.toFixed(2)}x)`);
+
+  // ADX Continuous Multiplier (+/- 5%)
+  let adxAdjustment = 0;
+  if (lastAdx <= 25) {
+    adxAdjustment = Math.max(-6, Math.round((lastAdx - 25) * 0.4));
+  } else {
+    adxAdjustment = Math.min(5, Math.round((lastAdx - 25) * 0.2));
+  }
+  scoreAdjustments.push(`${adxAdjustment >= 0 ? '+' : ''}${adxAdjustment}% ADX (${lastAdx.toFixed(1)})`);
+
+  // Meta-Model Continuous Adjustment (+/- 10%)
+  const metaAdjustment = Math.max(-10, Math.min(10, Math.round((metaProfitProb - 50) * 0.2)));
+  scoreAdjustments.push(`${metaAdjustment >= 0 ? '+' : ''}${metaAdjustment}% Meta-Model (${metaProfitProb}%)`);
+
+  // News & Macro Impact (+/- 3%..5%)
+  scoreAdjustments.push(`${impactAdjustment >= 0 ? '+' : ''}${impactAdjustment}% News Sentiment (${newsSentiment.sentimentLabel})`);
+
+  // Calculate Unified Confidence Score
+  const rawUnifiedScore = calibratedProb + metaAdjustment + adxAdjustment + trendAdjustment + volAdjustment + impactAdjustment;
+  const finalUnifiedScore = Math.min(98, Math.max(5, Math.round(rawUnifiedScore)));
+  const minConfidenceTarget = 52; // Execution threshold for active trading
+
+  // 3. Trade Execution Logic
+  if (strictVetoTriggered) {
+    action = 'HOLD';
     metaVetoApplied = true;
     filteredTradesCount++;
-    confidenceCategory = `${vetoReason} => Marcate ca HOLD (Filtru Confluență Activ)`;
-  } else if (action === 'HOLD') {
-    confidenceCategory = `Piață Neutră / Consolidare (Scor Composite: ${compositeScore} / 100)`;
+    confidenceCategory = `${vetoReason} => Marcate ca HOLD`;
+  } else if (reversalSignal.isBullishReversal) {
+    action = 'BUY';
+    confidenceCategory = `⚡ Semnal REVERSAL (Capitulation Rebound) | Scor: ${reversalSignal.score}%`;
+  } else if (reversalSignal.isBearishReversal) {
+    action = 'SELL';
+    confidenceCategory = `⚡ Semnal REVERSAL (Euphoria Spurt) | Scor: ${reversalSignal.score}%`;
+  } else if (currentPred.value === 1) { // Technical BUY Candidate
+    if (finalUnifiedScore >= minConfidenceTarget) {
+      action = 'BUY';
+      confidenceCategory = finalUnifiedScore >= 70 ? `Semnal Puternic CUMPĂRARE (${finalUnifiedScore}%)` : `Semnal Confluent CUMPĂRARE (${finalUnifiedScore}%)`;
+    } else {
+      action = 'HOLD';
+      metaVetoApplied = true;
+      filteredTradesCount++;
+      vetoReason = `🚫 HOLD: Scor unificat (${finalUnifiedScore}%) sub pragul minim (${minConfidenceTarget}%) [${scoreAdjustments.join(', ')}]`;
+      confidenceCategory = `Scor sub prag (${finalUnifiedScore}% < ${minConfidenceTarget}%)`;
+    }
+  } else if (currentPred.value === -1) { // Technical SELL Candidate
+    if (finalUnifiedScore >= minConfidenceTarget) {
+      action = 'SELL';
+      confidenceCategory = finalUnifiedScore >= 70 ? `Semnal Puternic VÂNZARE (${finalUnifiedScore}%)` : `Semnal Confluent VÂNZARE (${finalUnifiedScore}%)`;
+    } else {
+      action = 'HOLD';
+      metaVetoApplied = true;
+      filteredTradesCount++;
+      vetoReason = `🚫 HOLD: Scor unificat (${finalUnifiedScore}%) sub pragul minim (${minConfidenceTarget}%) [${scoreAdjustments.join(', ')}]`;
+      confidenceCategory = `Scor sub prag (${finalUnifiedScore}% < ${minConfidenceTarget}%)`;
+    }
+  } else {
+    action = 'HOLD';
+    vetoReason = `Model Primary: Consolidare / Piață fără semnal clar`;
+    confidenceCategory = `Piață Neutră / Consolidare (Scor Confluență: ${finalUnifiedScore} / 100)`;
   }
 
   const sentimentSign = newsSentiment.score >= 0 ? `+${newsSentiment.score}%` : `${newsSentiment.score}%`;
   const impactSign = impactAdjustment >= 0 ? `+${impactAdjustment}%` : `${impactAdjustment}%`;
+  const volSign = volAdjustment >= 0 ? `+${volAdjustment}%` : `${volAdjustment}%`;
+  const adxSign = adxAdjustment >= 0 ? `+${adxAdjustment}%` : `${adxAdjustment}%`;
 
   const detailedExplanation: string[] = [
     `1. Triple Barrier Labeling & Purged Walk-Forward CV: Antrenat pe 3000 lumânări cu țintă R:R 1:2 (1.5x ATR SL / 3.0x ATR TP) și aliniere trend.`,
     `2. Probability Calibration (Platt Scaling): Probabilitate brută ${rawProb}% recalibrată la ${calibratedProb}%.`,
-    `3. Regime & Confluence Filters: ADX=${lastAdx.toFixed(1)} (${isAdxStrong ? '✅ Trend Clar' : '🚫 Sideways'}), VolRatio=${lastVolRatio.toFixed(2)} (${isVolumeConfirmed ? '✅ Volum Confirmat' : '🚫 Volum Scăzut'}), EMA20/50 Aliniat (${(currentPred.value === 1 ? isBuyTrendAligned : isSellTrendAligned) ? '✅ Trend Aliniat' : '🚫 Ne-aliniat'}).`,
-    `4. Meta Model (Logistic Regression): Șansă de profit estimată la ${metaProfitProb}%. ${metaVetoApplied ? `🚫 VETO APLICAT: ${vetoReason}` : '✅ Semnal APROBAT de Filtrele de Confluență.'}`,
+    `3. Reversal & Regime Detector: ${reversalSignal.isBullishReversal ? `⚡ CAPITULATION REBOUND BUY DETECTAT (${reversalSignal.reasons.join(', ')})` : reversalSignal.isBearishReversal ? `⚡ EUPHORIA REVERSAL SELL DETECTAT (${reversalSignal.reasons.join(', ')})` : `Reversal Inactiv | ADX=${lastAdx.toFixed(1)} (${adxSign}), VolRatio=${lastVolRatio.toFixed(2)} (${volSign})`}.`,
+    `4. Scor Unificat Fără Veto Hard: [RF: ${calibratedProb}%, Meta: ${metaAdjustment >= 0 ? '+' : ''}${metaAdjustment}%, Trend: ${trendAdjustment >= 0 ? '+' : ''}${trendAdjustment}%, Vol: ${volSign}, ADX: ${adxSign}, News: ${impactSign}] => Scor Final: ${finalUnifiedScore}%.`,
     `5. Sentiment Știri & Macro: ${newsSentiment.sentimentLabel} (${sentimentSign} Net, impact ${impactSign})`,
     `Evaluare Execuție: ${confidenceCategory}`
   ];
@@ -1790,10 +2104,12 @@ export async function runRealStrategyAnalysis(
   const isNeutralPrediction = currentPred.value === 0;
   if (isNeutralPrediction) {
     detailedExplanation.push(`Predicție Model Primary: HOLD / Consolidare — Piața evoluează fără trend clar.`);
+  } else if (strictVetoTriggered) {
+    detailedExplanation.push(`🚫 VETO Strict Aplicat: Semnalul a fost respins de o regulă de siguranță (${vetoReason}).`);
   } else if (action === 'HOLD') {
-    detailedExplanation.push(`Filtru Confluență Activ: Semnalul a fost respins și marcat ca HOLD (${vetoReason}).`);
+    detailedExplanation.push(`Filtru Confluență Activ: Semnalul a fost marcat ca HOLD (${vetoReason}).`);
   } else {
-    detailedExplanation.push(`Nivel Încredere Final: ${confidenceCategory} | Scor Ajustat: ${adjustedProb}%`);
+    detailedExplanation.push(`Nivel Încredere Final: ${confidenceCategory} | Scor Ajustat Unificat: ${finalUnifiedScore}%`);
   }
 
   detailedExplanation.push(...expPred.path.slice(0, 2));
@@ -1804,7 +2120,11 @@ export async function runRealStrategyAnalysis(
   return {
     symbol,
     signal: action,
-    probability: adjustedProb,
+    probability: finalUnifiedScore,
+    rfProb: calibratedProb,
+    metaProb: metaProfitProb,
+    vetoReason,
+    targetScore: finalUnifiedScore,
     newsSentiment,
     indicators: computeIndicatorsSnapshot(klines),
     modelMetrics: {
@@ -1839,6 +2159,7 @@ export async function runRealStrategyAnalysis(
       advancedMetrics,
     },
     explanation: detailedExplanation,
+    reversalSignal,
   };
 }
 

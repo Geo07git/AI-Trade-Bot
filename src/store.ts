@@ -15,12 +15,31 @@ export interface Position {
   currentPrice: number;
 }
 
+export interface SignalJournalEntry {
+  id: string;
+  timestamp: string;
+  time: string;
+  symbol: string;
+  price: number;
+  rfProb: number;
+  metaProb: number;
+  reversalScore: number;
+  isReversal: boolean;
+  reversalType?: 'bullish' | 'bearish';
+  newsSentiment: string;
+  finalAction: 'BUY' | 'SELL' | 'HOLD';
+  vetoReason: string;
+  explanation?: string[];
+}
+
 interface TradingStore {
   balance: number;
   initialBalance: number;
   watchlist: WatchlistItem[];
   positions: Position[];
   logs: { time: string; message: string; type: 'info' | 'success' | 'warning'; equity?: number }[];
+  signalJournal: SignalJournalEntry[];
+  tradeHistory: any[];
   maxLogs: number;
   autoTradingActive: boolean;
   circuitBreakerTriggered: boolean;
@@ -57,6 +76,7 @@ interface TradingStore {
   addLog: (message: string, type?: 'info' | 'success' | 'warning') => void;
   setMaxLogs: (limit: number) => void;
   clearLogs: () => void;
+  clearSignalJournal: () => void;
   setAutoTradingActive: (active: boolean) => void;
   resetCircuitBreaker: () => void;
   setDataInterval: (seconds: number) => void;
@@ -111,6 +131,8 @@ export const useTradingStore = create<TradingStore>()(
   ],
   positions: [],
   logs: [],
+  signalJournal: [],
+  tradeHistory: [],
   maxLogs: 1000,
   autoTradingActive: false,
   circuitBreakerTriggered: false,
@@ -324,6 +346,11 @@ export const useTradingStore = create<TradingStore>()(
     fetch('/api/bot/clear-logs', { method: 'POST' }).catch(() => {});
   },
 
+  clearSignalJournal: () => {
+    set({ signalJournal: [] });
+    fetch('/api/bot/clear-signal-journal', { method: 'POST' }).catch(() => {});
+  },
+
   setAutoTradingActive: (active) => {
     set({ autoTradingActive: active });
     fetch('/api/bot/config', {
@@ -500,6 +527,7 @@ export const useTradingStore = create<TradingStore>()(
           balance: data.state.balance,
           initialBalance: data.state.initialBalance,
           logs: data.state.logs,
+          signalJournal: data.state.signalJournal || [],
           lastCheckAt: data.state.lastCheckAt || data.lastCheckAt
         });
       }

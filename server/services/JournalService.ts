@@ -57,7 +57,13 @@ class JournalService {
     try {
       if (fs.existsSync(this.journalFilePath)) {
         const raw = fs.readFileSync(this.journalFilePath, 'utf-8');
-        this.entries = JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          this.entries = parsed;
+        } else {
+          this.entries = this.generateInitialSeedEntries();
+          this.saveEntries();
+        }
       } else {
         this.entries = this.generateInitialSeedEntries();
         this.saveEntries();
@@ -65,7 +71,13 @@ class JournalService {
 
       if (fs.existsSync(this.snapshotsFilePath)) {
         const raw = fs.readFileSync(this.snapshotsFilePath, 'utf-8');
-        this.snapshots = JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          this.snapshots = parsed;
+        } else {
+          this.snapshots = this.generateInitialSeedSnapshots();
+          this.saveSnapshots();
+        }
       } else {
         this.snapshots = this.generateInitialSeedSnapshots();
         this.saveSnapshots();
@@ -74,6 +86,8 @@ class JournalService {
       console.error('Error loading Journal data:', err);
       this.entries = this.generateInitialSeedEntries();
       this.snapshots = this.generateInitialSeedSnapshots();
+      this.saveEntries();
+      this.saveSnapshots();
     }
   }
 

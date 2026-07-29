@@ -89,6 +89,11 @@ async function startServer() {
     res.json({ success: true, state: botEngine.state });
   });
 
+  app.post('/api/bot/clear-signal-journal', (req, res) => {
+    botEngine.clearSignalJournal();
+    res.json({ success: true, state: botEngine.state });
+  });
+
   app.post('/api/bot/reset-circuit-breaker', (req, res) => {
     botEngine.resetCircuitBreaker();
     res.json({ success: true, state: botEngine.state });
