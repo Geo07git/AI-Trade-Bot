@@ -58,12 +58,7 @@ class JournalService {
       if (fs.existsSync(this.journalFilePath)) {
         const raw = fs.readFileSync(this.journalFilePath, 'utf-8');
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          this.entries = parsed;
-        } else {
-          this.entries = this.generateInitialSeedEntries();
-          this.saveEntries();
-        }
+        this.entries = Array.isArray(parsed) ? parsed : [];
       } else {
         this.entries = this.generateInitialSeedEntries();
         this.saveEntries();
@@ -72,23 +67,28 @@ class JournalService {
       if (fs.existsSync(this.snapshotsFilePath)) {
         const raw = fs.readFileSync(this.snapshotsFilePath, 'utf-8');
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          this.snapshots = parsed;
-        } else {
-          this.snapshots = this.generateInitialSeedSnapshots();
-          this.saveSnapshots();
-        }
+        this.snapshots = Array.isArray(parsed) ? parsed : [];
       } else {
         this.snapshots = this.generateInitialSeedSnapshots();
         this.saveSnapshots();
       }
     } catch (err) {
       console.error('Error loading Journal data:', err);
-      this.entries = this.generateInitialSeedEntries();
-      this.snapshots = this.generateInitialSeedSnapshots();
+      this.entries = [];
+      this.snapshots = [];
       this.saveEntries();
       this.saveSnapshots();
     }
+  }
+
+  public clearSnapshots() {
+    this.snapshots = [];
+    this.saveSnapshots();
+  }
+
+  public clearAllEntries() {
+    this.entries = [];
+    this.saveEntries();
   }
 
   private saveEntries() {

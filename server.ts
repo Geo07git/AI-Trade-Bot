@@ -195,6 +195,24 @@ async function startServer() {
     }
   });
 
+  app.post('/api/journal/clear-snapshots', (req, res) => {
+    try {
+      journalService.clearSnapshots();
+      res.json({ success: true, message: 'Rapoartele zilnice și istoricul equity au fost șterse cu succes.' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Eroare la ștergerea rapoartelor zilnice' });
+    }
+  });
+
+  app.post('/api/journal/clear-entries', (req, res) => {
+    try {
+      journalService.clearAllEntries();
+      res.json({ success: true, message: 'Jurnalul de tranzacții a fost șters cu succes.' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Eroare la ștergerea jurnalului' });
+    }
+  });
+
   app.get('/api/journal/analytics', (req, res) => {
     try {
       const analytics = journalService.getAnalytics();

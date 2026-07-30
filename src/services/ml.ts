@@ -953,10 +953,10 @@ export class RandomForest {
     let value = 0;
     let prob = probHold;
 
-    if (probBuy > probSell && probBuy >= 55 && probBuy > probHold) {
+    if (probBuy > probSell && probBuy >= 38 && probBuy >= probHold * 0.85) {
       value = 1;
       prob = probBuy;
-    } else if (probSell > probBuy && probSell >= 55 && probSell > probHold) {
+    } else if (probSell > probBuy && probSell >= 55 && probSell >= probHold) {
       value = -1;
       prob = probSell;
     }
@@ -1933,7 +1933,7 @@ export async function runRealStrategyAnalysis(
   );
   
   const expPred = predictTree(explainerTree, currentFeatures);
-  const currentPred = productionModel.predict(currentFeatures);
+  const currentPred = productionModel.predictDetailed(currentFeatures);
 
   // Feature Pruning: Filter features with importance >= 2.0%
   const featureImportances = finalModel.getPermutationImportances(lastFoldTestData.length > 0 ? lastFoldTestData : dataset.slice(-300));
@@ -2045,17 +2045,20 @@ export async function runRealStrategyAnalysis(
   // 1. Strict Veto Guardrails Only (Hard safety stops before continuous scoring)
   let strictVetoTriggered = false;
 
-  // Veto Check 1: Primary RF Prob < 50% or Neutral prediction with no reversal
-  const minRfTarget = 50;
-  if (currentPred.value === 0 || calibratedProb < minRfTarget) {
+  const isBuyCandidate = currentPred.value === 1 || (currentPred.probBuy > currentPred.probSell && currentPred.probBuy >= 36);
+  const isSellCandidate = currentPred.value === -1 || (currentPred.probSell > currentPred.probBuy && currentPred.probSell >= 58);
+
+  // Veto Check 1: Primary RF Prob < 36% or Neutral prediction with no candidate bias or reversal
+  const minRfTarget = 36;
+  if (!isBuyCandidate && !isSellCandidate && calibratedProb < minRfTarget) {
     if (!reversalSignal.isBullishReversal && !reversalSignal.isBearishReversal) {
       strictVetoTriggered = true;
       vetoReason = `🚫 VETO Strict: Probabilitate Random Forest < ${minRfTarget}% (${calibratedProb}%)`;
     }
   }
 
-  // Veto Check 2: Meta-Model Profit Probability < 35%
-  const minMetaTarget = 35;
+  // Veto Check 2: Meta-Model Profit Probability < 20%
+  const minMetaTarget = 20;
   if (!strictVetoTriggered && metaProfitProb < minMetaTarget) {
     if (!reversalSignal.isBullishReversal && !reversalSignal.isBearishReversal) {
       strictVetoTriggered = true;
@@ -2063,18 +2066,18 @@ export async function runRealStrategyAnalysis(
     }
   }
 
-  // Veto Check 3: Reversal Signal with zero volume (< 0.20x)
-  if (!strictVetoTriggered && (reversalSignal.isBullishReversal || reversalSignal.isBearishReversal) && lastVolRatio < 0.2) {
+  // Veto Check 3: Reversal Signal with zero volume (< 0.15x)
+  if (!strictVetoTriggered && (reversalSignal.isBullishReversal || reversalSignal.isBearishReversal) && lastVolRatio < 0.15) {
     strictVetoTriggered = true;
-    vetoReason = `🚫 VETO Strict: Reversal neconfirmat cu volum nul (${lastVolRatio.toFixed(2)}x < 0.20x)`;
+    vetoReason = `🚫 VETO Strict: Reversal neconfirmat cu volum nul (${lastVolRatio.toFixed(2)}x < 0.15x)`;
   }
 
   // Veto Check 4: Post-Exit Cooldown Engine Protection (Blocks quick re-entries after SL / TP)
   const cooldownInfo = getSymbolCooldown(symbol);
   if (!strictVetoTriggered && cooldownInfo && cooldownInfo.active) {
-    if (currentPred.value === 1 || reversalSignal.isBullishReversal) {
-      // Require extreme high confidence (RF >= 72% AND Meta >= 60%) to bypass active post-exit cooldown
-      const isExtremeHighConfidence = calibratedProb >= 72 && metaProfitProb >= 60;
+    if (isBuyCandidate || reversalSignal.isBullishReversal) {
+      // Require high confidence (RF >= 65% AND Meta >= 55%) to bypass active post-exit cooldown
+      const isExtremeHighConfidence = calibratedProb >= 65 && metaProfitProb >= 55;
       if (!isExtremeHighConfidence) {
         strictVetoTriggered = true;
         vetoReason = `🚫 VETO Cooldown: Monedă recent închisă cu ${cooldownInfo.reason}. Re-intrare blocată încă ${cooldownInfo.remainingMinutes} min (protecție supra-tranzacționare).`;
@@ -2082,34 +2085,46 @@ export async function runRealStrategyAnalysis(
     }
   }
 
-  // 2. Continuous Adjustments Engine (Converting EMA, Volume, ADX, News into smooth score multipliers)
+  // 2. Continuous Adjustments Engine (Converting EMA, RSI, Volume, ADX, News into smooth score multipliers)
   const scoreAdjustments: string[] = [];
 
   // EMA Trend Alignment (+/- 5%) — Correct alignment: BUY in Uptrend = bonus, SELL in Downtrend = bonus
   let trendAdjustment = 0;
-  if (currentPred.value === 1) { // BUY Candidate
-    const isUptrend = curEma20 >= curEma50;
-    trendAdjustment = isUptrend ? 4 : -5;
+  if (isBuyCandidate) { // BUY Candidate
+    const isUptrend = curEma20 >= curEma50 * 0.998;
+    trendAdjustment = isUptrend ? 4 : -3;
     scoreAdjustments.push(`${trendAdjustment >= 0 ? '+' : ''}${trendAdjustment}% EMA Trend (${isUptrend ? 'Uptrend Aligned' : 'Downtrend Counter-Trend'})`);
-  } else if (currentPred.value === -1) { // SELL Candidate
-    const isDowntrend = curEma20 <= curEma50;
-    trendAdjustment = isDowntrend ? 4 : -5;
+  } else if (isSellCandidate) { // SELL Candidate
+    const isDowntrend = curEma20 <= curEma50 * 1.002;
+    trendAdjustment = isDowntrend ? 4 : -3;
     scoreAdjustments.push(`${trendAdjustment >= 0 ? '+' : ''}${trendAdjustment}% EMA Trend (${isDowntrend ? 'Downtrend Aligned' : 'Uptrend Counter-Trend'})`);
   }
+
+  // RSI Momentum Adjustment
+  const lastRsiVal = rsiArr[lastI] || 50;
+  let rsiAdjustment = 0;
+  if (isBuyCandidate) {
+    if (lastRsiVal < 45) rsiAdjustment = Math.min(8, Math.round((50 - lastRsiVal) * 0.4));
+    else if (lastRsiVal > 68) rsiAdjustment = -5;
+  } else if (isSellCandidate) {
+    if (lastRsiVal > 55) rsiAdjustment = Math.min(8, Math.round((lastRsiVal - 50) * 0.4));
+    else if (lastRsiVal < 32) rsiAdjustment = -5;
+  }
+  if (rsiAdjustment !== 0) scoreAdjustments.push(`${rsiAdjustment >= 0 ? '+' : ''}${rsiAdjustment}% RSI (${lastRsiVal.toFixed(1)})`);
 
   // Volume Continuous Multiplier (+/- 5%)
   let volAdjustment = 0;
   if (lastVolRatio >= 1.0) {
     volAdjustment = Math.min(5, Math.round((lastVolRatio - 1.0) * 4));
   } else {
-    volAdjustment = Math.max(-6, Math.round((lastVolRatio - 1.0) * 7));
+    volAdjustment = Math.max(-4, Math.round((lastVolRatio - 1.0) * 5));
   }
   scoreAdjustments.push(`${volAdjustment >= 0 ? '+' : ''}${volAdjustment}% Volum (${lastVolRatio.toFixed(2)}x)`);
 
   // ADX Continuous Multiplier (+/- 5%)
   let adxAdjustment = 0;
   if (lastAdx <= 25) {
-    adxAdjustment = Math.max(-6, Math.round((lastAdx - 25) * 0.4));
+    adxAdjustment = Math.max(-4, Math.round((lastAdx - 25) * 0.3));
   } else {
     adxAdjustment = Math.min(5, Math.round((lastAdx - 25) * 0.2));
   }
@@ -2123,9 +2138,9 @@ export async function runRealStrategyAnalysis(
   scoreAdjustments.push(`${impactAdjustment >= 0 ? '+' : ''}${impactAdjustment}% News Sentiment (${newsSentiment.sentimentLabel})`);
 
   // Calculate Unified Confidence Score
-  const rawUnifiedScore = calibratedProb + metaAdjustment + adxAdjustment + trendAdjustment + volAdjustment + impactAdjustment;
+  const rawUnifiedScore = calibratedProb + metaAdjustment + adxAdjustment + trendAdjustment + rsiAdjustment + volAdjustment + impactAdjustment;
   const finalUnifiedScore = Math.min(98, Math.max(5, Math.round(rawUnifiedScore)));
-  const minConfidenceTarget = 52; // Execution threshold for active trading
+  const minConfidenceTarget = 42; // Execution threshold for active trading
 
   // 3. Trade Execution Logic
   if (strictVetoTriggered) {
@@ -2139,10 +2154,10 @@ export async function runRealStrategyAnalysis(
   } else if (reversalSignal.isBearishReversal) {
     action = 'SELL';
     confidenceCategory = `⚡ Semnal REVERSAL (Euphoria Spurt) | Scor: ${reversalSignal.score}%`;
-  } else if (currentPred.value === 1) { // Technical BUY Candidate
+  } else if (isBuyCandidate) { // Technical BUY Candidate
     if (finalUnifiedScore >= minConfidenceTarget) {
       action = 'BUY';
-      confidenceCategory = finalUnifiedScore >= 70 ? `Semnal Puternic CUMPĂRARE (${finalUnifiedScore}%)` : `Semnal Confluent CUMPĂRARE (${finalUnifiedScore}%)`;
+      confidenceCategory = finalUnifiedScore >= 65 ? `Semnal Puternic CUMPĂRARE (${finalUnifiedScore}%)` : `Semnal Confluent CUMPĂRARE (${finalUnifiedScore}%)`;
     } else {
       action = 'HOLD';
       metaVetoApplied = true;
@@ -2150,10 +2165,10 @@ export async function runRealStrategyAnalysis(
       vetoReason = `🚫 HOLD: Scor unificat (${finalUnifiedScore}%) sub pragul minim (${minConfidenceTarget}%) [${scoreAdjustments.join(', ')}]`;
       confidenceCategory = `Scor sub prag (${finalUnifiedScore}% < ${minConfidenceTarget}%)`;
     }
-  } else if (currentPred.value === -1) { // Technical SELL Candidate
+  } else if (isSellCandidate) { // Technical SELL Candidate
     if (finalUnifiedScore >= minConfidenceTarget) {
       action = 'SELL';
-      confidenceCategory = finalUnifiedScore >= 70 ? `Semnal Puternic VÂNZARE (${finalUnifiedScore}%)` : `Semnal Confluent VÂNZARE (${finalUnifiedScore}%)`;
+      confidenceCategory = finalUnifiedScore >= 65 ? `Semnal Puternic VÂNZARE (${finalUnifiedScore}%)` : `Semnal Confluent VÂNZARE (${finalUnifiedScore}%)`;
     } else {
       action = 'HOLD';
       metaVetoApplied = true;

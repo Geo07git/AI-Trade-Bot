@@ -15,7 +15,8 @@ import {
   Search,
   ChevronDown,
   RefreshCw,
-  BarChart2
+  BarChart2,
+  Trash2
 } from 'lucide-react';
 import { JournalEntry, DailySnapshot } from '../types';
 import { useTradingStore } from '../store';
@@ -46,8 +47,36 @@ interface JournalAnalytics {
   }>;
 }
 
+function formatInTimezone(isoStr?: string, timeZone = 'Europe/Bucharest'): string {
+  if (!isoStr) return '';
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return isoStr;
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).formatToParts(d);
+
+    const year = parts.find(p => p.type === 'year')?.value;
+    const month = parts.find(p => p.type === 'month')?.value;
+    const day = parts.find(p => p.type === 'day')?.value;
+    let hour = parts.find(p => p.type === 'hour')?.value;
+    if (hour === '24') hour = '00';
+    const minute = parts.find(p => p.type === 'minute')?.value;
+
+    return `${year}-${month}-${day} ${hour}:${minute}`;
+  } catch {
+    return isoStr.replace('T', ' ').substring(0, 16);
+  }
+}
+
 export function TradingJournal() {
-  const { tradeHistory, positions, binanceMode } = useTradingStore();
+  const { tradeHistory, positions, binanceMode, timezone } = useTradingStore();
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [snapshots, setSnapshots] = useState<DailySnapshot[]>([]);
   const [analytics, setAnalytics] = useState<JournalAnalytics | null>(null);
@@ -99,6 +128,32 @@ export function TradingJournal() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  const handleClearSnapshots = async () => {
+    if (!window.confirm('Ești sigur că vrei să ștergi toate rapoartele zilnice și istoricul evoluției equity?')) return;
+    try {
+      const res = await fetch('/api/journal/clear-snapshots', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setSnapshots([]);
+      }
+    } catch (err) {
+      console.error('Eroare la ștergerea rapoartelor zilnice:', err);
+    }
+  };
+
+  const handleClearEntries = async () => {
+    if (!window.confirm('Ești sigur că vrei să ștergi toate înregistrările din jurnalul de tranzacții?')) return;
+    try {
+      const res = await fetch('/api/journal/clear-entries', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setEntries([]);
+      }
+    } catch (err) {
+      console.error('Eroare la ștergerea jurnalului:', err);
+    }
+  };
 
   // Merge journal entries with tradeHistory from store if API returned empty
   const allDisplayEntries = useMemo(() => {
@@ -379,7 +434,7 @@ export function TradingJournal() {
                     filteredEntries.map((e) => (
                       <tr key={e.id} className="hover:bg-white/[0.02] transition-colors">
                         <td className="px-5 py-3.5 font-mono text-zinc-400 whitespace-nowrap">
-                          {(e.timestamp || new Date().toISOString()).replace('T', ' ').substring(0, 16)}
+                          {formatInTimezone(e.timestamp || new Date().toISOString(), timezone || 'Europe/Bucharest')}
                         </td>
 
                         <td className="px-5 py-3.5 font-semibold text-white whitespace-nowrap">
@@ -471,7 +526,7 @@ export function TradingJournal() {
                     </div>
 
                     <span className="text-[11px] font-mono text-zinc-400">
-                      {(e.timestamp || new Date().toISOString()).replace('T', ' ').substring(0, 16)}
+                      {formatInTimezone(e.timestamp || new Date().toISOString(), timezone || 'Europe/Bucharest')}
                     </span>
                   </div>
 
@@ -595,70 +650,104 @@ export function TradingJournal() {
         <div className="space-y-8">
           {/* Equity & PnL History Chart */}
           <div className="bg-zinc-900/40 border border-white/5 rounded-2xl p-6 space-y-4">
-            <h2 className="font-serif text-lg text-white flex items-center gap-2">
-              <TrendingUp size={18} className="text-emerald-400" />
-              Evoluție Zilnică Equity Portofoliu
-            </h2>
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <h2 className="font-serif text-lg text-white flex items-center gap-2">
+                <TrendingUp size={18} className="text-emerald-400" />
+                Evoluție Zilnică Equity Portofoliu
+              </h2>
 
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={snapshotChartData}>
-                  <defs>
-                    <linearGradient id="equityGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0.0}/>
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="date" stroke="#52525b" fontSize={11} tickLine={false} />
-                  <YAxis stroke="#52525b" fontSize={11} tickLine={false} domain={['auto', 'auto']} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#09090b', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '12px' }}
-                    labelStyle={{ color: '#a1a1aa' }}
-                  />
-                  <Area type="monotone" dataKey="equity" name="Equity ($)" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#equityGrad)" />
-                </AreaChart>
-              </ResponsiveContainer>
+              {snapshots.length > 0 && (
+                <button
+                  onClick={handleClearSnapshots}
+                  className="flex items-center gap-2 px-3.5 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-sm"
+                  title="Șterge definitiv rapoartele zilnice și graficul equity"
+                >
+                  <Trash2 size={14} />
+                  Șterge Rapoarte & Istoric Equity
+                </button>
+              )}
             </div>
+
+            {snapshots.length > 0 ? (
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={snapshotChartData}>
+                    <defs>
+                      <linearGradient id="equityGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0.0}/>
+                      </linearGradient>
+                    </defs>
+                    <XAxis dataKey="date" stroke="#52525b" fontSize={11} tickLine={false} />
+                    <YAxis stroke="#52525b" fontSize={11} tickLine={false} domain={['auto', 'auto']} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#09090b', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '12px' }}
+                      labelStyle={{ color: '#a1a1aa' }}
+                    />
+                    <Area type="monotone" dataKey="equity" name="Equity ($)" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#equityGrad)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="py-12 text-center text-zinc-500 text-sm font-mono bg-zinc-950/40 rounded-xl border border-dashed border-white/5">
+                Nu există rapoarte zilnice sau au fost șterse. Noile snapshot-uri se vor genera automat pe măsură ce botul înregistrează activitate.
+              </div>
+            )}
           </div>
 
           {/* Daily Snapshots Table */}
           <div className="bg-zinc-900/40 border border-white/5 rounded-2xl overflow-hidden">
-            <div className="p-4 border-b border-white/5">
+            <div className="p-4 border-b border-white/5 flex items-center justify-between">
               <h3 className="font-serif text-md text-white">Istoric Înregistrări Zilnice (Daily Snapshots)</h3>
+              {snapshots.length > 0 && (
+                <button
+                  onClick={handleClearSnapshots}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-lg text-[11px] font-medium transition-colors cursor-pointer"
+                >
+                  <Trash2 size={13} />
+                  Șterge Tot
+                </button>
+              )}
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-zinc-900/80 text-zinc-400 font-mono text-[11px] uppercase border-b border-white/5">
-                  <tr>
-                    <th className="px-5 py-3">Dată</th>
-                    <th className="px-5 py-3 text-right">Equity Închidere</th>
-                    <th className="px-5 py-3 text-right">PnL Realizat Zi</th>
-                    <th className="px-5 py-3 text-right">PnL Nerealizat</th>
-                    <th className="px-5 py-3 text-right">Win Rate Zi</th>
-                    <th className="px-5 py-3 text-right">Tranzacții</th>
-                    <th className="px-5 py-3">Cel Mai Bun Model</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5 text-zinc-300 font-mono">
-                  {snapshots.map((s) => (
-                    <tr key={s.date} className="hover:bg-white/[0.02]">
-                      <td className="px-5 py-3 text-white font-bold">{s.date}</td>
-                      <td className="px-5 py-3 text-right">${s.equity.toLocaleString()}</td>
-                      <td className={`px-5 py-3 text-right font-bold ${s.realizedPnL >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                        {s.realizedPnL >= 0 ? '+' : ''}${s.realizedPnL.toFixed(2)}
-                      </td>
-                      <td className="px-5 py-3 text-right text-zinc-400">
-                        ${s.unrealizedPnL.toFixed(2)}
-                      </td>
-                      <td className="px-5 py-3 text-right text-emerald-400">{s.winRate}%</td>
-                      <td className="px-5 py-3 text-right text-zinc-200">{s.totalTrades}</td>
-                      <td className="px-5 py-3 font-sans text-zinc-300">{s.bestModel}</td>
+            {snapshots.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-zinc-900/80 text-zinc-400 font-mono text-[11px] uppercase border-b border-white/5">
+                    <tr>
+                      <th className="px-5 py-3">Dată</th>
+                      <th className="px-5 py-3 text-right">Equity Închidere</th>
+                      <th className="px-5 py-3 text-right">PnL Realizat Zi</th>
+                      <th className="px-5 py-3 text-right">PnL Nerealizat</th>
+                      <th className="px-5 py-3 text-right">Win Rate Zi</th>
+                      <th className="px-5 py-3 text-right">Tranzacții</th>
+                      <th className="px-5 py-3">Cel Mai Bun Model</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-white/5 text-zinc-300 font-mono">
+                    {snapshots.map((s) => (
+                      <tr key={s.date} className="hover:bg-white/[0.02]">
+                        <td className="px-5 py-3 text-white font-bold">{s.date}</td>
+                        <td className="px-5 py-3 text-right">${s.equity.toLocaleString()}</td>
+                        <td className={`px-5 py-3 text-right font-bold ${s.realizedPnL >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                          {s.realizedPnL >= 0 ? '+' : ''}${s.realizedPnL.toFixed(2)}
+                        </td>
+                        <td className="px-5 py-3 text-right text-zinc-400">
+                          ${s.unrealizedPnL.toFixed(2)}
+                        </td>
+                        <td className="px-5 py-3 text-right text-emerald-400">{s.winRate}%</td>
+                        <td className="px-5 py-3 text-right text-zinc-200">{s.totalTrades}</td>
+                        <td className="px-5 py-3 font-sans text-zinc-300">{s.bestModel}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="p-8 text-center text-zinc-500 text-xs font-mono">
+                Tabelul de rapoarte zilnice este gol.
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -74,6 +74,34 @@ function formatQuantityByStepSize(amount: number, stepSize: number): string {
   return roundedQty.toFixed(precision);
 }
 
+export function formatInTimezone(isoStr?: string, timeZone = 'Europe/Bucharest'): string {
+  if (!isoStr) return '';
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return isoStr;
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).formatToParts(d);
+
+    const year = parts.find(p => p.type === 'year')?.value;
+    const month = parts.find(p => p.type === 'month')?.value;
+    const day = parts.find(p => p.type === 'day')?.value;
+    let hour = parts.find(p => p.type === 'hour')?.value;
+    if (hour === '24') hour = '00';
+    const minute = parts.find(p => p.type === 'minute')?.value;
+
+    return `${year}-${month}-${day} ${hour}:${minute}`;
+  } catch {
+    return isoStr.replace('T', ' ').substring(0, 16);
+  }
+}
+
 export interface WatchlistItem {
   symbol: string;
   price: number | null;
@@ -345,6 +373,27 @@ async function fetchLivePriceServer(symbol: string): Promise<number | null> {
 }
 
 const serverSignalCache = new Map<string, { result: { action: 'BUY' | 'SELL' | 'HOLD'; prob: number; modelName: string; reason: string }; timestamp: number }>();
+const realStrategyCache = new Map<string, { res: any; timestamp: number }>();
+
+async function getCachedRealStrategyAnalysis(symbol: string): Promise<any> {
+  const cleanSymbol = symbol.trim().toUpperCase();
+  const cached = realStrategyCache.get(cleanSymbol);
+  if (cached && (Date.now() - cached.timestamp < 180000)) { // 3-minute cache
+    return cached.res;
+  }
+
+  try {
+    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('ML Strategy Timeout')), 25000));
+    const res = await Promise.race([runRealStrategyAnalysis(cleanSymbol, 'rf'), timeoutPromise]);
+    if (res) {
+      realStrategyCache.set(cleanSymbol, { res, timestamp: Date.now() });
+    }
+    return res;
+  } catch (err: any) {
+    console.warn(`[ML Real Strategy Warning for ${cleanSymbol}]: ${err?.message || err}`);
+    return null;
+  }
+}
 
 async function generateSignalServer(symbol: string, currentPrice: number): Promise<{ action: 'BUY' | 'SELL' | 'HOLD'; prob: number; modelName: string; reason: string }> {
   const cleanSymbol = symbol.trim().toUpperCase();
@@ -354,13 +403,13 @@ async function generateSignalServer(symbol: string, currentPrice: number): Promi
   }
 
   try {
-    const mlRes = await runRealStrategyAnalysis(cleanSymbol, 'rf');
+    const mlRes = await getCachedRealStrategyAnalysis(cleanSymbol);
     if (mlRes && mlRes.signal) {
       const result = {
         action: mlRes.signal as 'BUY' | 'SELL' | 'HOLD',
         prob: mlRes.probability,
         modelName: 'Random Forest Ensemble 2.0',
-        reason: `Scor Composite AI: ${mlRes.probability}% (${mlRes.signal})`
+        reason: mlRes.explanation?.find((e: string) => e.includes('Semnal') || e.includes('Reversal')) || `Scor Composite AI: ${mlRes.probability}% (${mlRes.signal})`
       };
       serverSignalCache.set(cleanSymbol, { result, timestamp: Date.now() });
       return result;
@@ -394,18 +443,22 @@ async function generateSignalServer(symbol: string, currentPrice: number): Promi
         const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
         const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + rs));
 
+        const lastClose = closes[closes.length - 1];
+        const prevClose = closes[closes.length - 2];
+        const mom = ((lastClose - prevClose) / prevClose) * 100;
+
         let action: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
         let prob = 52;
 
-        if (rsi < 40) {
+        if (rsi < 48 || (rsi < 55 && mom > 0.3)) {
           action = 'BUY';
-          prob = Math.min(90, Math.max(62, Math.round(65 + (40 - rsi) * 1.2)));
-        } else if (rsi > 60) {
+          prob = Math.min(92, Math.max(55, Math.round(58 + (50 - rsi) * 1.1 + Math.max(0, mom * 5))));
+        } else if (rsi > 65) {
           action = 'SELL';
-          prob = Math.min(90, Math.max(62, Math.round(65 + (rsi - 60) * 1.2)));
+          prob = Math.min(90, Math.max(58, Math.round(60 + (rsi - 65) * 1.2)));
         }
 
-        const fallbackRes = { action, prob, modelName: 'Random Forest Fallback', reason: `RSI (${rsi.toFixed(1)})` };
+        const fallbackRes = { action, prob, modelName: 'Technical Fallback (RSI+Mom)', reason: `RSI (${rsi.toFixed(1)}) | Mom (${mom.toFixed(2)}%)` };
         serverSignalCache.set(cleanSymbol, { result: fallbackRes, timestamp: Date.now() });
         return fallbackRes;
       }
@@ -566,6 +619,24 @@ class ServerBotEngine {
         }
         if (!this.state.initialBalance && this.state.initialBalance !== 0) {
           this.state.initialBalance = this.state.balance || 100;
+        }
+
+        // Ensure arrays exist
+        if (!Array.isArray(this.state.logs)) this.state.logs = [];
+        if (!Array.isArray(this.state.signalJournal)) this.state.signalJournal = [];
+        if (!Array.isArray(this.state.positions)) this.state.positions = [];
+        if (!Array.isArray(this.state.tradeHistory)) this.state.tradeHistory = [];
+
+        if (this.state.logs.length === 0) {
+          const time = new Intl.DateTimeFormat('en-US', {
+            timeZone: this.state.timezone || 'Europe/Bucharest',
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+          }).format(new Date());
+          this.state.logs.push({
+            time,
+            message: '[SERVICIU 24/7 🚀] Motorul de tranzacționare AI a fost pornit pe server. Se începe scanarea pieței.',
+            type: 'info'
+          });
         }
 
         // Merge missing symbols from default watchlist and ensure they are active
@@ -1076,7 +1147,7 @@ class ServerBotEngine {
           reply = `<b>📖 Ultimele ${recentEntries.length} Tranzacții din Jurnal:</b>\n\n` +
             recentEntries.map(t => {
               const pnlStr = t.action === 'SELL' ? ` | PnL: ${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)} (${t.pnlPercent >= 0 ? '+' : ''}${t.pnlPercent.toFixed(2)}%)` : '';
-              return `• <b>${t.action === 'BUY' ? '🟢 BUY' : '🔴 SELL'} ${t.symbol}</b> @ $${t.price.toFixed(2)}\n  Quantitate: ${t.amount} | Model: ${t.modelName} (${t.mlProbability}% prob)${pnlStr}\n  Dată: ${t.timestamp.replace('T', ' ').substring(0, 16)}`;
+              return `• <b>${t.action === 'BUY' ? '🟢 BUY' : '🔴 SELL'} ${t.symbol}</b> @ $${t.price.toFixed(2)}\n  Quantitate: ${t.amount} | Model: ${t.modelName} (${t.mlProbability}% prob)${pnlStr}\n  Dată: ${formatInTimezone(t.timestamp, this.state.timezone || 'Europe/Bucharest')}`;
             }).join('\n\n');
         }
         break;
@@ -1348,8 +1419,18 @@ class ServerBotEngine {
       if (existing) {
         existing.amount += amount;
         existing.currentPrice = price;
+        if (!(existing as any).highestPrice || price > (existing as any).highestPrice) {
+          (existing as any).highestPrice = price;
+        }
       } else {
-        this.state.positions.push({ symbol, amount, entryPrice: price, currentPrice: price });
+        this.state.positions.push({
+          symbol,
+          amount,
+          entryPrice: price,
+          currentPrice: price,
+          highestPrice: price,
+          openedAt: Date.now()
+        } as any);
       }
       this.state.balance -= cost;
       this.state.totalTradesExecuted += 1;
@@ -1546,8 +1627,8 @@ class ServerBotEngine {
     const profitPercent = (profit / this.state.initialBalance) * 100;
     const profitSign = profit >= 0 ? '+' : '';
 
-    const todayStr = date.toISOString().split('T')[0];
-    const todayTrades = this.state.tradeHistory.filter(t => t.timestamp.startsWith(todayStr));
+    const todayStr = formatInTimezone(date.toISOString(), this.state.timezone || 'Europe/Bucharest').split(' ')[0];
+    const todayTrades = this.state.tradeHistory.filter(t => formatInTimezone(t.timestamp, this.state.timezone || 'Europe/Bucharest').startsWith(todayStr));
     
     // In our simplified simulation, we count total trades executed. But let's build stats from todayTrades.
     const winTrades = todayTrades.filter(t => t.pnl > 0);
@@ -1642,8 +1723,13 @@ class ServerBotEngine {
         // Update position current price if held
         if (pos) {
           pos.currentPrice = livePrice;
+          if (!(pos as any).highestPrice || livePrice > (pos as any).highestPrice) {
+            (pos as any).highestPrice = livePrice;
+          }
+          const highestPrice = (pos as any).highestPrice || livePrice;
           const pnl = (livePrice - pos.entryPrice) * pos.amount;
           const pnlPercent = ((livePrice - pos.entryPrice) / pos.entryPrice) * 100;
+          const maxPnlPercent = ((highestPrice - pos.entryPrice) / pos.entryPrice) * 100;
           const pnlValueStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
           const amountToSell = pos.amount;
 
@@ -1658,6 +1744,18 @@ class ServerBotEngine {
             this.addLog(`[Take Profit Server] Ieșire din ${item.symbol} la $${livePrice} (PNL: +${pnlPercent.toFixed(2)}% | ${pnlValueStr})`, 'success');
             await this.executeTrade(item.symbol, 'SELL', livePrice, amountToSell);
             this.sendNotification(`🎯 **[Take Profit]** Vândut automat ${item.symbol} la $${livePrice} (PNL +${pnlPercent.toFixed(2)}% | ${pnlValueStr})`);
+          }
+          // Trailing Profit Lock: Lock in profit if peak PnL reached >= +1.5% and price pulled back by 0.6% from peak
+          else if (maxPnlPercent >= 1.5 && livePrice <= highestPrice * 0.994) {
+            this.addLog(`[Trailing Profit Lock 💰] Profit de +${pnlPercent.toFixed(2)}% securizat pentru ${item.symbol} (Vârf atins: +${maxPnlPercent.toFixed(2)}%). Executăm vânzare.`, 'success');
+            await this.executeTrade(item.symbol, 'SELL', livePrice, amountToSell);
+            this.sendNotification(`💰 **[Trailing Profit]** Vândut ${item.symbol} la $${livePrice} cu profit securizat +${pnlPercent.toFixed(2)}% (${pnlValueStr})`);
+          }
+          // Break-Even Protection: If position previously reached >= +0.6% profit and price dropped back to entry + 0.15% fee buffer
+          else if (maxPnlPercent >= 0.6 && livePrice <= pos.entryPrice * 1.0015 && pnlPercent >= 0) {
+            this.addLog(`[Break-Even Protect 🛡️] Protecție Break-Even activată pentru ${item.symbol} la $${livePrice} (+${pnlPercent.toFixed(2)}% profit acoperă comision).`, 'info');
+            await this.executeTrade(item.symbol, 'SELL', livePrice, amountToSell);
+            this.sendNotification(`🛡️ **[Break-Even]** Ieșire în siguranță ${item.symbol} la $${livePrice} (PNL +${pnlPercent.toFixed(2)}%)`);
           }
         }
       }
@@ -1704,7 +1802,7 @@ class ServerBotEngine {
           }
 
           const currentPrice = price || getFallbackBasePrice(item.symbol);
-          const mlRes = await runRealStrategyAnalysis(item.symbol, 'rf').catch(() => null);
+          const mlRes = await getCachedRealStrategyAnalysis(item.symbol);
           
           let signal: { action: 'BUY' | 'SELL' | 'HOLD'; prob: number; modelName: string; reason: string } | null = null;
           if (mlRes) {
@@ -1766,7 +1864,7 @@ class ServerBotEngine {
         const pos = this.state.positions.find(p => p.symbol === item.symbol);
         const isHolding = pos && pos.amount > 0;
 
-        if (signal.action === 'BUY' && signal.prob >= 48) {
+        if (signal.action === 'BUY' && signal.prob >= 40) {
           if (!this.state.autoTradingActive) {
             this.addLog(`[Signal AI BUY] ${item.symbol} (Scor Composite: ${signal.prob}% | ${signal.reason}), dar Auto-Trading este OPRIT.`, 'warning');
           } else if (isHolding) {
@@ -1793,16 +1891,67 @@ class ServerBotEngine {
               this.addLog(`[Signal AI BUY] ${item.symbol} (Scor: ${signal.prob}%): Alocarea rămasă ($${allocation.toFixed(2)} USDT) este sub minimul de $10 USDT per ordin.`, 'warning');
             }
           }
-        } else if (signal.action === 'SELL' && signal.prob >= 48 && isHolding) {
+        } else if (signal.action === 'SELL' && isHolding) {
           if (!this.state.autoTradingActive) {
             this.addLog(`[Signal AI SELL] ${item.symbol} (Scor Composite: ${signal.prob}%), dar Auto-Trading este OPRIT.`, 'warning');
           } else {
-            this.addLog(`[Signal Server ML 2.0] ${item.symbol}: SELL (${signal.prob}% prob). Executăm vânzare automat.`, 'info');
-            await this.executeTrade(item.symbol, 'SELL', currentPrice, pos!.amount, {
-              mlProbability: signal.prob,
-              modelName: signal.modelName,
-              entryReason: signal.reason
-            });
+            const pnlPercent = pos ? ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100 : 0;
+            const holdDurationMinutes = pos && (pos as any).openedAt ? (Date.now() - (pos as any).openedAt) / 60000 : 60;
+
+            // RE-DESIGNED EXIT QUALITY FILTER:
+            // Timpul (>45 min) NU mai este un motiv automat de vânzare!
+            // Dacă modelul AI indică încredere ridicată (ex: RF >= 55% sau prob ridicată de BUY/HOLD), menținem poziția (HOLD)!
+
+            // 1. Take Profit valid prin semnal ML: PnL >= +1.0% și signal.prob >= 60%
+            const isTakeProfitValid = pnlPercent >= 1.0 && signal.prob >= 60;
+
+            // 2. Marcare profit înalt: PnL >= +2.0% și signal.prob >= 50%
+            const isHighProfitExit = pnlPercent >= 2.0 && signal.prob >= 50;
+
+            // 3. Reversal urgent Bearish: Semnal urgent Bearish cu scor >= 75% și hold >= 5 minute
+            const isUrgentBearishReversal = (signal.reason.includes('BEARISH REVERSAL') || signal.reason.includes('Euphoria')) && signal.prob >= 75 && holdDurationMinutes >= 5;
+
+            // 4. Stagnare prelungită + AI slabă (< 55% prob & PnL < 0.5%):
+            // DOAR dacă au trecut > 45 min AND scorul de vânzare este scăzut / încrederea modelului s-a prăbușit AND PnL < 0.5%.
+            // Dacă scorul modelului este ridicat (ex: > 60%), poziția SE MENȚINE (HOLD)!
+            const isStagnantWeakExit = holdDurationMinutes >= 45 && signal.prob < 55 && pnlPercent < 0.5;
+
+            let shouldExecuteSell = false;
+            let sellReasonCategory = '';
+
+            if (isTakeProfitValid) {
+              shouldExecuteSell = true;
+              sellReasonCategory = `Take Profit ML (+${pnlPercent.toFixed(2)}%)`;
+            } else if (isHighProfitExit) {
+              shouldExecuteSell = true;
+              sellReasonCategory = `Marcare Profit (+${pnlPercent.toFixed(2)}%)`;
+            } else if (isUrgentBearishReversal) {
+              shouldExecuteSell = true;
+              sellReasonCategory = `Bearish Reversal Confirmat`;
+            } else if (isStagnantWeakExit) {
+              shouldExecuteSell = true;
+              sellReasonCategory = `Rotire Stagnare AI Slabe (<55% prob, >45m, PnL: ${pnlPercent.toFixed(2)}%)`;
+            }
+
+            if (shouldExecuteSell) {
+              this.addLog(`[Signal Server ML 2.0] ${item.symbol}: SELL (${sellReasonCategory} | Scor: ${signal.prob}% | PnL: ${pnlPercent.toFixed(2)}% | Hold: ${Math.round(holdDurationMinutes)}m). Executăm vânzare.`, 'info');
+              await this.executeTrade(item.symbol, 'SELL', currentPrice, pos!.amount, {
+                mlProbability: signal.prob,
+                modelName: signal.modelName,
+                entryReason: `${sellReasonCategory} - ${signal.reason}`
+              });
+            } else {
+              let holdReason = '';
+              if (holdDurationMinutes >= 45 && signal.prob >= 55) {
+                holdReason = `Încredere AI ridicată (${signal.prob}% >= 55%). Poziția se menține (HOLD)!`;
+              } else if (pnlPercent < 1.0) {
+                holdReason = `PnL curent (+${pnlPercent.toFixed(2)}%) este sub ținta minimă de marcare profit (+1.0%). Poziția se menține!`;
+              } else {
+                holdReason = `Semnal SELL (${signal.prob}%) insuficient pentru PnL curent (${pnlPercent.toFixed(2)}%). Poziția se menține.`;
+              }
+
+              this.addLog(`[HOLD Protecție PnL 🛡️] ${item.symbol}: ${holdReason}`, 'info');
+            }
           }
         }
       }

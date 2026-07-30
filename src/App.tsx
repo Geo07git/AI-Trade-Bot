@@ -116,38 +116,34 @@ export default function App() {
             lastLogRef.current = currentLatestLog;
           }
 
-          // Sync server state to Zustand store (differentially to prevent unnecessary UI re-renders)
+          // Sync server state to Zustand store cleanly
           const updates: any = {};
-          const isDiff = (a: any, b: any) => JSON.stringify(a) !== JSON.stringify(b);
 
-          if (currentStore.balance !== data.balance && data.balance !== undefined) updates.balance = data.balance;
-          const targetInit = data.initialBalance ?? data.balance;
-          if (targetInit !== undefined && currentStore.initialBalance !== targetInit) updates.initialBalance = targetInit;
-          if (data.positions && isDiff(currentStore.positions, data.positions)) updates.positions = data.positions;
-          if (data.logs && isDiff(currentStore.logs, data.logs)) updates.logs = data.logs;
-          if (isDiff(currentStore.signalJournal, data.signalJournal || [])) updates.signalJournal = data.signalJournal || [];
-          if (isDiff(currentStore.tradeHistory, data.tradeHistory || [])) updates.tradeHistory = data.tradeHistory || [];
-          if (data.watchlist && isDiff(currentStore.watchlist, data.watchlist)) updates.watchlist = data.watchlist;
-          if (data.autoTradingActive !== undefined && currentStore.autoTradingActive !== data.autoTradingActive) updates.autoTradingActive = data.autoTradingActive;
-          if (data.circuitBreakerTriggered !== undefined && currentStore.circuitBreakerTriggered !== !!data.circuitBreakerTriggered) updates.circuitBreakerTriggered = !!data.circuitBreakerTriggered;
-          if (currentStore.circuitBreakerReason !== (data.circuitBreakerReason || null)) updates.circuitBreakerReason = data.circuitBreakerReason || null;
-          if (data.maxLogs && currentStore.maxLogs !== data.maxLogs) updates.maxLogs = data.maxLogs;
-          if (data.notificationProvider && currentStore.notificationProvider !== data.notificationProvider) updates.notificationProvider = data.notificationProvider;
-          if (data.discordWebhookUrl && currentStore.discordWebhookUrl !== data.discordWebhookUrl) updates.discordWebhookUrl = data.discordWebhookUrl;
-          if (data.telegramBotToken && currentStore.telegramBotToken !== data.telegramBotToken) updates.telegramBotToken = data.telegramBotToken;
-          if (data.telegramChatId && currentStore.telegramChatId !== data.telegramChatId) updates.telegramChatId = data.telegramChatId;
-          if (data.timezone && currentStore.timezone !== data.timezone) updates.timezone = data.timezone;
-          if (data.reportConfig && isDiff(currentStore.reportConfig, data.reportConfig)) updates.reportConfig = data.reportConfig;
-          if (data.apiKey && currentStore.apiKey !== data.apiKey) updates.apiKey = data.apiKey;
-          if (data.apiSecret && currentStore.apiSecret !== data.apiSecret) updates.apiSecret = data.apiSecret;
-          if (data.testnetApiKey && currentStore.testnetApiKey !== data.testnetApiKey) updates.testnetApiKey = data.testnetApiKey;
-          if (data.testnetApiSecret && currentStore.testnetApiSecret !== data.testnetApiSecret) updates.testnetApiSecret = data.testnetApiSecret;
-          if (data.binanceMode && currentStore.binanceMode !== data.binanceMode) updates.binanceMode = data.binanceMode;
-          if (data.lastCheckAt && currentStore.lastCheckAt !== data.lastCheckAt) updates.lastCheckAt = data.lastCheckAt;
+          if (data.balance !== undefined) updates.balance = data.balance;
+          if (data.initialBalance !== undefined) updates.initialBalance = data.initialBalance;
+          if (data.positions) updates.positions = data.positions;
+          if (data.logs) updates.logs = data.logs;
+          if (data.signalJournal) updates.signalJournal = data.signalJournal;
+          if (data.tradeHistory) updates.tradeHistory = data.tradeHistory;
+          if (data.watchlist) updates.watchlist = data.watchlist;
 
-          if (Object.keys(updates).length > 0) {
-            useTradingStore.setState(updates);
-          }
+          if (data.autoTradingActive !== undefined) updates.autoTradingActive = data.autoTradingActive;
+          if (data.circuitBreakerTriggered !== undefined) updates.circuitBreakerTriggered = !!data.circuitBreakerTriggered;
+          if (data.circuitBreakerReason !== undefined) updates.circuitBreakerReason = data.circuitBreakerReason || null;
+          if (data.maxLogs) updates.maxLogs = data.maxLogs;
+          if (data.notificationProvider) updates.notificationProvider = data.notificationProvider;
+          if (data.discordWebhookUrl) updates.discordWebhookUrl = data.discordWebhookUrl;
+          if (data.telegramBotToken) updates.telegramBotToken = data.telegramBotToken;
+          if (data.telegramChatId) updates.telegramChatId = data.telegramChatId;
+          if (data.timezone) updates.timezone = data.timezone;
+          if (data.apiKey) updates.apiKey = data.apiKey;
+          if (data.apiSecret) updates.apiSecret = data.apiSecret;
+          if (data.testnetApiKey) updates.testnetApiKey = data.testnetApiKey;
+          if (data.testnetApiSecret) updates.testnetApiSecret = data.testnetApiSecret;
+          if (data.binanceMode) updates.binanceMode = data.binanceMode;
+          if (data.lastCheckAt) updates.lastCheckAt = data.lastCheckAt;
+
+          useTradingStore.setState(updates);
         }
       } catch (err) {
         console.debug('Server state sync error:', err);
