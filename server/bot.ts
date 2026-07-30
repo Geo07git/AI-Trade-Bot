@@ -3,7 +3,7 @@ import path from 'path';
 import Binance from 'binance-api-node';
 import { getAccountInfo } from './services/BinanceService';
 import { journalService } from './services/JournalService';
-import { runRealStrategyAnalysis } from '../src/services/ml';
+import { runRealStrategyAnalysis, registerSymbolCooldown } from '../src/services/ml';
 
 function createBinanceClient(options: { apiKey?: string; apiSecret?: string; httpBase?: string }) {
   const binanceFactory = typeof Binance === 'function' 
@@ -560,27 +560,12 @@ class ServerBotEngine {
           this.state.autoTradingActive = false;
         }
 
-        // Auto-adjust paper/testnet trading balance if empty or negligible
-        if (this.state.binanceMode === 'paper' || this.state.binanceMode === 'testnet') {
-          if (!this.state.balance || this.state.balance < 10) {
-            this.state.balance = 300;
-            this.state.initialBalance = 300;
-            this.state.circuitBreakerTriggered = false;
-            this.state.circuitBreakerReason = null;
-          }
+        // Default balance initialization if missing
+        if (!this.state.balance && this.state.balance !== 0) {
+          this.state.balance = 100;
         }
-
-        // Fix initialBalance mismatch in live/testnet to prevent false circuit breaker trip
-        const currentEquity = this.calculateEquity();
-        if (this.state.binanceMode !== 'paper' && currentEquity > 0) {
-          if (Math.abs(currentEquity - (this.state.initialBalance || 0)) / (this.state.initialBalance || 1) > 0.5) {
-            this.state.initialBalance = currentEquity;
-            if (this.state.circuitBreakerReason?.includes('-99') || this.state.circuitBreakerReason?.includes('10000')) {
-              this.state.circuitBreakerTriggered = false;
-              this.state.circuitBreakerReason = null;
-              this.state.autoTradingActive = true;
-            }
-          }
+        if (!this.state.initialBalance && this.state.initialBalance !== 0) {
+          this.state.initialBalance = this.state.balance || 100;
         }
 
         // Merge missing symbols from default watchlist and ensure they are active
@@ -644,10 +629,9 @@ class ServerBotEngine {
       return false;
     }
 
-    // Profit milestone (+10%): Record milestone & re-benchmark initial balance without stopping 24/7 trading
+    // Profit milestone (+10%): Record milestone without changing fixed initial capital baseline
     if (pnlPercent >= 10.0) {
-      this.state.initialBalance = equity;
-      this.addLog(`🎉 [MILESTONE +10%] Țintă de profit atinsă! Portofoliu: $${equity.toFixed(2)}. Re-inițializăm pragul pentru continuitate 24/7.`, 'success', equity);
+      this.addLog(`🎉 [MILESTONE +10%] Țintă de profit atinsă! Portofoliu: $${equity.toFixed(2)} (Initial: $${initial.toFixed(2)}).`, 'success', equity);
       this.sendNotification(`🎉 **[AI.TRADE Bot 24/7] Milestone +10% Profit Atins!**\nPortofoliu actual: $${equity.toFixed(2)} USDT.\nSistemul continuă tranzacționarea automată!`);
       this.savePersistedState();
       return false;
@@ -687,8 +671,7 @@ class ServerBotEngine {
     this.state.circuitBreakerTriggered = false;
     this.state.circuitBreakerReason = null;
     this.state.autoTradingActive = true;
-    this.state.initialBalance = this.calculateEquity();
-    this.addLog('[CIRCUIT BREAKER RESETAT] Circuit breaker eliberat și inițializat. Auto-trading reluat.', 'info', this.calculateEquity());
+    this.addLog('[CIRCUIT BREAKER RESETAT] Circuit breaker eliberat. Auto-trading reluat.', 'info', this.calculateEquity());
     this.savePersistedState();
   }
 
@@ -698,7 +681,6 @@ class ServerBotEngine {
       if (newConfig.autoTradingActive) {
         this.state.circuitBreakerTriggered = false;
         this.state.circuitBreakerReason = null;
-        this.state.initialBalance = this.calculateEquity();
       }
     }
     if (newConfig.circuitBreakerTriggered !== undefined) this.state.circuitBreakerTriggered = newConfig.circuitBreakerTriggered;
@@ -720,8 +702,8 @@ class ServerBotEngine {
     if (newConfig.initialBalance !== undefined) this.state.initialBalance = newConfig.initialBalance;
     if (newConfig.balance !== undefined) {
       this.state.balance = newConfig.balance;
-      if (newConfig.initialBalance === undefined) {
-        this.state.initialBalance = this.calculateEquity();
+      if (!this.state.initialBalance && this.state.initialBalance !== 0) {
+        this.state.initialBalance = newConfig.balance;
       }
     }
     if (newConfig.reportConfig !== undefined) this.state.reportConfig = { ...this.state.reportConfig, ...newConfig.reportConfig };
@@ -736,12 +718,6 @@ class ServerBotEngine {
       this.state.circuitBreakerTriggered = false;
       this.state.circuitBreakerReason = null;
       this.state.autoTradingActive = true;
-      if (newConfig.binanceMode === 'paper' && this.state.balance < 10) {
-        this.state.balance = 300;
-        this.state.initialBalance = 300;
-      } else {
-        this.state.initialBalance = this.calculateEquity();
-      }
     }
 
     this.savePersistedState();
@@ -811,8 +787,9 @@ class ServerBotEngine {
           }
 
           this.state.balance = freeUsdt;
-          // Re-baseline initial balance to total account value on sync so circuit breaker measures real trading PnL
-          this.state.initialBalance = totalUsdt > 0 ? totalUsdt : (freeUsdt || 100);
+          if (!this.state.initialBalance && this.state.initialBalance !== 0) {
+            this.state.initialBalance = totalUsdt > 0 ? totalUsdt : (freeUsdt || 100);
+          }
           if (this.state.circuitBreakerTriggered && freeUsdt > 0) {
             this.state.circuitBreakerTriggered = false;
             this.state.circuitBreakerReason = null;
@@ -1448,8 +1425,11 @@ class ServerBotEngine {
             notes: meta?.notes || `Închis PnL: ${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%`
           });
 
+          // Register Post-Exit Cooldown Protection Engine (Prevents rapid re-entries)
+          const cooldownMinutes = registerSymbolCooldown(symbol, pnlPercent, pnlPercent >= 0 ? `Take Profit (+${pnlPercent.toFixed(2)}%)` : `Stop Loss (${pnlPercent.toFixed(2)}%)`);
+          
           const currentEquity = this.calculateEquity();
-          this.addLog(`[SERVER BOT] Vândut ${amount} ${symbol} @ $${price} (PNL: ${pnlPercent.toFixed(2)}% | ${pnlValueStr})`, 'warning', currentEquity);
+          this.addLog(`[SERVER BOT] Vândut ${amount} ${symbol} @ $${price} (PNL: ${pnlPercent.toFixed(2)}% | ${pnlValueStr}). Moneda intră în cooldown ${cooldownMinutes} min.`, 'warning', currentEquity);
 
           this.sendNotification(`🔴 **[AI.TRADE Bot Server 24/7]** VÂNZARE\nActiv: ${symbol}\nPreț: $${price}\nCantitate: ${amount}\nPNL: ${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}% (${pnlValueStr})\nBalanță liberă: $${this.state.balance.toFixed(2)}`);
         }

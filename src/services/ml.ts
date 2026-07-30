@@ -1,6 +1,71 @@
 // Technical Indicators & Machine Learning Engine for AI.TRADE Bot
 // Performs real mathematical calculations and trains actual ML models on historical market klines.
 
+interface CooldownEntry {
+  cooldownUntil: number;
+  reason: string;
+  durationMinutes: number;
+}
+
+const symbolCooldownMap = new Map<string, CooldownEntry>();
+
+/**
+ * Registers a post-exit cooldown for a symbol after Stop Loss or Take Profit.
+ * Prevents over-trading and quick re-entries that give back profits.
+ */
+export function registerSymbolCooldown(symbol: string, pnlPercent: number, customReason?: string): number {
+  const cleanSym = symbol.toUpperCase().replace('USDT', '') + 'USDT';
+  let durationMinutes = 20;
+
+  if (pnlPercent < 0) {
+    // Stop Loss: 30 minutes cooldown
+    durationMinutes = 30;
+  } else if (pnlPercent < 3) {
+    // Take Profit 0-3%: 15 minutes cooldown
+    durationMinutes = 15;
+  } else if (pnlPercent < 5) {
+    // Take Profit 3-5%: 30 minutes cooldown
+    durationMinutes = 30;
+  } else if (pnlPercent < 10) {
+    // Take Profit 5-10%: 60 minutes cooldown
+    durationMinutes = 60;
+  } else {
+    // Take Profit > 10%: 90 minutes cooldown
+    durationMinutes = 90;
+  }
+
+  const cooldownUntil = Date.now() + (durationMinutes * 60 * 1000);
+  const reasonStr = customReason || (pnlPercent < 0 ? `Stop Loss (${pnlPercent.toFixed(2)}%)` : `Take Profit (+${pnlPercent.toFixed(2)}%)`);
+
+  symbolCooldownMap.set(cleanSym, {
+    cooldownUntil,
+    reason: reasonStr,
+    durationMinutes
+  });
+
+  return durationMinutes;
+}
+
+export function getSymbolCooldown(symbol: string): { active: boolean; remainingMinutes: number; reason: string; durationMinutes: number } | null {
+  const cleanSym = symbol.toUpperCase().replace('USDT', '') + 'USDT';
+  const entry = symbolCooldownMap.get(cleanSym);
+  if (!entry) return null;
+
+  const now = Date.now();
+  if (now >= entry.cooldownUntil) {
+    symbolCooldownMap.delete(cleanSym);
+    return null;
+  }
+
+  const remainingMinutes = Math.ceil((entry.cooldownUntil - now) / 60000);
+  return {
+    active: true,
+    remainingMinutes,
+    reason: entry.reason,
+    durationMinutes: entry.durationMinutes
+  };
+}
+
 export interface Kline {
   timestamp: number;
   open: number;
@@ -2004,17 +2069,32 @@ export async function runRealStrategyAnalysis(
     vetoReason = `🚫 VETO Strict: Reversal neconfirmat cu volum nul (${lastVolRatio.toFixed(2)}x < 0.20x)`;
   }
 
+  // Veto Check 4: Post-Exit Cooldown Engine Protection (Blocks quick re-entries after SL / TP)
+  const cooldownInfo = getSymbolCooldown(symbol);
+  if (!strictVetoTriggered && cooldownInfo && cooldownInfo.active) {
+    if (currentPred.value === 1 || reversalSignal.isBullishReversal) {
+      // Require extreme high confidence (RF >= 72% AND Meta >= 60%) to bypass active post-exit cooldown
+      const isExtremeHighConfidence = calibratedProb >= 72 && metaProfitProb >= 60;
+      if (!isExtremeHighConfidence) {
+        strictVetoTriggered = true;
+        vetoReason = `🚫 VETO Cooldown: Monedă recent închisă cu ${cooldownInfo.reason}. Re-intrare blocată încă ${cooldownInfo.remainingMinutes} min (protecție supra-tranzacționare).`;
+      }
+    }
+  }
+
   // 2. Continuous Adjustments Engine (Converting EMA, Volume, ADX, News into smooth score multipliers)
   const scoreAdjustments: string[] = [];
 
-  // EMA Trend Alignment (+/- 5%)
+  // EMA Trend Alignment (+/- 5%) — Correct alignment: BUY in Uptrend = bonus, SELL in Downtrend = bonus
   let trendAdjustment = 0;
   if (currentPred.value === 1) { // BUY Candidate
-    trendAdjustment = curEma20 >= curEma50 ? 4 : -5;
-    scoreAdjustments.push(`${trendAdjustment >= 0 ? '+' : ''}${trendAdjustment}% EMA Trend (${curEma20 >= curEma50 ? 'Uptrend' : 'Downtrend'})`);
+    const isUptrend = curEma20 >= curEma50;
+    trendAdjustment = isUptrend ? 4 : -5;
+    scoreAdjustments.push(`${trendAdjustment >= 0 ? '+' : ''}${trendAdjustment}% EMA Trend (${isUptrend ? 'Uptrend Aligned' : 'Downtrend Counter-Trend'})`);
   } else if (currentPred.value === -1) { // SELL Candidate
-    trendAdjustment = curEma20 <= curEma50 ? 4 : -5;
-    scoreAdjustments.push(`${trendAdjustment >= 0 ? '+' : ''}${trendAdjustment}% EMA Trend (${curEma20 <= curEma50 ? 'Downtrend' : 'Uptrend'})`);
+    const isDowntrend = curEma20 <= curEma50;
+    trendAdjustment = isDowntrend ? 4 : -5;
+    scoreAdjustments.push(`${trendAdjustment >= 0 ? '+' : ''}${trendAdjustment}% EMA Trend (${isDowntrend ? 'Downtrend Aligned' : 'Uptrend Counter-Trend'})`);
   }
 
   // Volume Continuous Multiplier (+/- 5%)
@@ -2087,18 +2167,60 @@ export async function runRealStrategyAnalysis(
     confidenceCategory = `Piață Neutră / Consolidare (Scor Confluență: ${finalUnifiedScore} / 100)`;
   }
 
+  // 4. Execution Engine (Optimal Entry & Adaptive Dynamic TP/SL Engine)
+  const lastClose = closes[lastI];
+  
+  // Dynamic ATR Multipliers based on ADX Regime
+  const slMultiplier = lastAdx > 30 ? 1.4 : 1.2;
+  const tpMultiplier = lastAdx > 30 ? 3.2 : 2.2;
+  let entryPrice = lastClose;
+  let tpPrice = lastClose;
+  let slPrice = lastClose;
+  let entryStrategy = 'Market Entry';
+
+  if (action === 'BUY') {
+    if (lastAdx > 35 && lastVolRatio > 1.3) {
+      entryStrategy = 'Momentum Market Entry (Breakout Confirmat)';
+      entryPrice = lastClose;
+    } else {
+      entryStrategy = 'Pullback Limit Entry (-0.45 ATR Discount)';
+      entryPrice = lastClose - (0.45 * lastAtr);
+    }
+    slPrice = entryPrice - (slMultiplier * lastAtr);
+    tpPrice = entryPrice + (tpMultiplier * lastAtr);
+  } else if (action === 'SELL') {
+    if (lastAdx > 35 && lastVolRatio > 1.3) {
+      entryStrategy = 'Momentum Market Entry (Breakdown Confirmat)';
+      entryPrice = lastClose;
+    } else {
+      entryStrategy = 'Pullback Limit Entry (+0.45 ATR Bonus)';
+      entryPrice = lastClose + (0.45 * lastAtr);
+    }
+    slPrice = entryPrice + (slMultiplier * lastAtr);
+    tpPrice = entryPrice - (tpMultiplier * lastAtr);
+  }
+
   const sentimentSign = newsSentiment.score >= 0 ? `+${newsSentiment.score}%` : `${newsSentiment.score}%`;
   const impactSign = impactAdjustment >= 0 ? `+${impactAdjustment}%` : `${impactAdjustment}%`;
   const volSign = volAdjustment >= 0 ? `+${volAdjustment}%` : `${volAdjustment}%`;
   const adxSign = adxAdjustment >= 0 ? `+${adxAdjustment}%` : `${adxAdjustment}%`;
+  const trendSign = trendAdjustment >= 0 ? `+${trendAdjustment}%` : `${trendAdjustment}%`;
+  const metaSign = metaAdjustment >= 0 ? `+${metaAdjustment}%` : `${metaAdjustment}%`;
 
   const detailedExplanation: string[] = [
-    `1. Triple Barrier Labeling & Purged Walk-Forward CV: Antrenat pe 3000 lumânări cu țintă R:R 1:2 (1.5x ATR SL / 3.0x ATR TP) și aliniere trend.`,
+    `1. Triple Barrier Labeling & Purged Walk-Forward CV: Antrenat pe 3000 lumânări cu aliniere trend.`,
     `2. Probability Calibration (Platt Scaling): Probabilitate brută ${rawProb}% recalibrată la ${calibratedProb}%.`,
     `3. Reversal & Regime Detector: ${reversalSignal.isBullishReversal ? `⚡ CAPITULATION REBOUND BUY DETECTAT (${reversalSignal.reasons.join(', ')})` : reversalSignal.isBearishReversal ? `⚡ EUPHORIA REVERSAL SELL DETECTAT (${reversalSignal.reasons.join(', ')})` : `Reversal Inactiv | ADX=${lastAdx.toFixed(1)} (${adxSign}), VolRatio=${lastVolRatio.toFixed(2)} (${volSign})`}.`,
-    `4. Scor Unificat Fără Veto Hard: [RF: ${calibratedProb}%, Meta: ${metaAdjustment >= 0 ? '+' : ''}${metaAdjustment}%, Trend: ${trendAdjustment >= 0 ? '+' : ''}${trendAdjustment}%, Vol: ${volSign}, ADX: ${adxSign}, News: ${impactSign}] => Scor Final: ${finalUnifiedScore}%.`,
+    `4. Contribuții Defalcate Scor Unificat:
+       • Random Forest (Bază Calibrată): ${calibratedProb}%
+       • Meta-Model Adjustment: ${metaSign}
+       • EMA Trend Alignment: ${trendSign}
+       • Volum Multiplier: ${volSign}
+       • ADX Trend Strength: ${adxSign}
+       • News & Sentiment Impact: ${impactSign}
+       ➜ Scor Final Ajustat: ${finalUnifiedScore}%`,
     `5. Sentiment Știri & Macro: ${newsSentiment.sentimentLabel} (${sentimentSign} Net, impact ${impactSign})`,
-    `Evaluare Execuție: ${confidenceCategory}`
+    action !== 'HOLD' ? `6. Execution Engine: Strategie [${entryStrategy}] | Intrare: $${entryPrice.toFixed(4)} | TP: $${tpPrice.toFixed(4)} (${tpMultiplier.toFixed(1)}x ATR) | SL: $${slPrice.toFixed(4)} (${slMultiplier.toFixed(1)}x ATR) | Risk/Reward 1:${(tpMultiplier / slMultiplier).toFixed(2)}` : `6. Execution Engine: Stare În Așteptare (HOLD)`
   ];
 
   const isNeutralPrediction = currentPred.value === 0;

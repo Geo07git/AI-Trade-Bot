@@ -26,9 +26,10 @@ import { fetchLivePrice } from './services/api';
 import { Menu, ShieldAlert } from 'lucide-react';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<ViewState>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { 
+    currentView,
+    setCurrentView,
     balance, 
     setBalance, 
     autoTradingActive, 
@@ -115,32 +116,38 @@ export default function App() {
             lastLogRef.current = currentLatestLog;
           }
 
-          // Sync server state to Zustand store
-          useTradingStore.setState({
-            balance: data.balance,
-            initialBalance: data.initialBalance ?? data.balance,
-            positions: data.positions,
-            logs: data.logs,
-            signalJournal: data.signalJournal || [],
-            tradeHistory: data.tradeHistory || [],
-            watchlist: data.watchlist,
-            autoTradingActive: data.autoTradingActive,
-            circuitBreakerTriggered: !!data.circuitBreakerTriggered,
-            circuitBreakerReason: data.circuitBreakerReason || null,
-            maxLogs: data.maxLogs || currentStore.maxLogs || 1000,
-            notificationProvider: data.notificationProvider || currentStore.notificationProvider,
-            discordWebhookUrl: data.discordWebhookUrl || currentStore.discordWebhookUrl,
-            telegramBotToken: data.telegramBotToken || currentStore.telegramBotToken,
-            telegramChatId: data.telegramChatId || currentStore.telegramChatId,
-            timezone: data.timezone || currentStore.timezone,
-            reportConfig: data.reportConfig || currentStore.reportConfig,
-            apiKey: data.apiKey || currentStore.apiKey,
-            apiSecret: data.apiSecret || currentStore.apiSecret,
-            testnetApiKey: data.testnetApiKey || currentStore.testnetApiKey,
-            testnetApiSecret: data.testnetApiSecret || currentStore.testnetApiSecret,
-            binanceMode: data.binanceMode || currentStore.binanceMode,
-            lastCheckAt: data.lastCheckAt || currentStore.lastCheckAt || null,
-          });
+          // Sync server state to Zustand store (differentially to prevent unnecessary UI re-renders)
+          const updates: any = {};
+          const isDiff = (a: any, b: any) => JSON.stringify(a) !== JSON.stringify(b);
+
+          if (currentStore.balance !== data.balance && data.balance !== undefined) updates.balance = data.balance;
+          const targetInit = data.initialBalance ?? data.balance;
+          if (targetInit !== undefined && currentStore.initialBalance !== targetInit) updates.initialBalance = targetInit;
+          if (data.positions && isDiff(currentStore.positions, data.positions)) updates.positions = data.positions;
+          if (data.logs && isDiff(currentStore.logs, data.logs)) updates.logs = data.logs;
+          if (isDiff(currentStore.signalJournal, data.signalJournal || [])) updates.signalJournal = data.signalJournal || [];
+          if (isDiff(currentStore.tradeHistory, data.tradeHistory || [])) updates.tradeHistory = data.tradeHistory || [];
+          if (data.watchlist && isDiff(currentStore.watchlist, data.watchlist)) updates.watchlist = data.watchlist;
+          if (data.autoTradingActive !== undefined && currentStore.autoTradingActive !== data.autoTradingActive) updates.autoTradingActive = data.autoTradingActive;
+          if (data.circuitBreakerTriggered !== undefined && currentStore.circuitBreakerTriggered !== !!data.circuitBreakerTriggered) updates.circuitBreakerTriggered = !!data.circuitBreakerTriggered;
+          if (currentStore.circuitBreakerReason !== (data.circuitBreakerReason || null)) updates.circuitBreakerReason = data.circuitBreakerReason || null;
+          if (data.maxLogs && currentStore.maxLogs !== data.maxLogs) updates.maxLogs = data.maxLogs;
+          if (data.notificationProvider && currentStore.notificationProvider !== data.notificationProvider) updates.notificationProvider = data.notificationProvider;
+          if (data.discordWebhookUrl && currentStore.discordWebhookUrl !== data.discordWebhookUrl) updates.discordWebhookUrl = data.discordWebhookUrl;
+          if (data.telegramBotToken && currentStore.telegramBotToken !== data.telegramBotToken) updates.telegramBotToken = data.telegramBotToken;
+          if (data.telegramChatId && currentStore.telegramChatId !== data.telegramChatId) updates.telegramChatId = data.telegramChatId;
+          if (data.timezone && currentStore.timezone !== data.timezone) updates.timezone = data.timezone;
+          if (data.reportConfig && isDiff(currentStore.reportConfig, data.reportConfig)) updates.reportConfig = data.reportConfig;
+          if (data.apiKey && currentStore.apiKey !== data.apiKey) updates.apiKey = data.apiKey;
+          if (data.apiSecret && currentStore.apiSecret !== data.apiSecret) updates.apiSecret = data.apiSecret;
+          if (data.testnetApiKey && currentStore.testnetApiKey !== data.testnetApiKey) updates.testnetApiKey = data.testnetApiKey;
+          if (data.testnetApiSecret && currentStore.testnetApiSecret !== data.testnetApiSecret) updates.testnetApiSecret = data.testnetApiSecret;
+          if (data.binanceMode && currentStore.binanceMode !== data.binanceMode) updates.binanceMode = data.binanceMode;
+          if (data.lastCheckAt && currentStore.lastCheckAt !== data.lastCheckAt) updates.lastCheckAt = data.lastCheckAt;
+
+          if (Object.keys(updates).length > 0) {
+            useTradingStore.setState(updates);
+          }
         }
       } catch (err) {
         console.debug('Server state sync error:', err);

@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { registerSymbolCooldown } from './services/ml';
+import { ViewState } from './types';
 
 export interface WatchlistItem {
   symbol: string;
@@ -33,6 +35,7 @@ export interface SignalJournalEntry {
 }
 
 interface TradingStore {
+  currentView: ViewState;
   balance: number;
   initialBalance: number;
   watchlist: WatchlistItem[];
@@ -65,6 +68,7 @@ interface TradingStore {
     monthly: { enabled: boolean };
   };
   
+  setCurrentView: (view: ViewState) => void;
   setBalance: (amount: number) => void;
   addFunds: (amount: number) => void;
   addWatchlist: (symbol: string) => void;
@@ -100,6 +104,7 @@ interface TradingStore {
 export const useTradingStore = create<TradingStore>()(
   persist(
     (set) => ({
+  currentView: 'dashboard',
   balance: 100,
   initialBalance: 100,
   watchlist: [
@@ -158,6 +163,7 @@ export const useTradingStore = create<TradingStore>()(
     monthly: { enabled: true }
   },
   
+  setCurrentView: (view) => set({ currentView: view }),
   setBalance: (amount) => {
     set({ balance: amount, initialBalance: amount, positions: [], logs: [] });
     fetch('/api/bot/reset', {
@@ -293,6 +299,9 @@ export const useTradingStore = create<TradingStore>()(
       } else if (action === 'SELL') {
         const existing = state.positions.find(p => p.symbol === symbol);
         if (existing && existing.amount >= amount) {
+          const pnlPercent = ((price - existing.entryPrice) / existing.entryPrice) * 100;
+          registerSymbolCooldown(symbol, pnlPercent, pnlPercent >= 0 ? `Take Profit (+${pnlPercent.toFixed(2)}%)` : `Stop Loss (${pnlPercent.toFixed(2)}%)`);
+
           const newPositions = state.positions.map(p => 
             p.symbol === symbol ? { ...p, amount: p.amount - amount } : p
           ).filter(p => p.amount > 0);

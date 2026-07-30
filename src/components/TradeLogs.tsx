@@ -559,22 +559,28 @@ export function TradeLogs() {
               </button>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
-              <div className="bg-black/50 border border-white/5 rounded-xl p-3">
+            <div className="grid grid-cols-4 gap-2.5">
+              <div className="bg-black/50 border border-white/5 rounded-xl p-2.5">
                 <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Random Forest</span>
-                <span className="text-lg font-mono font-bold text-emerald-400">{selectedSignal.rfProb}%</span>
+                <span className="text-base font-mono font-bold text-emerald-400">{selectedSignal.rfProb}%</span>
               </div>
-              <div className="bg-black/50 border border-white/5 rounded-xl p-3">
+              <div className="bg-black/50 border border-white/5 rounded-xl p-2.5">
                 <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Meta Model</span>
-                <span className="text-lg font-mono font-bold text-blue-400">{selectedSignal.metaProb}%</span>
+                <span className="text-base font-mono font-bold text-blue-400">{selectedSignal.metaProb}%</span>
               </div>
-              <div className="bg-black/50 border border-white/5 rounded-xl p-3">
+              <div className="bg-black/50 border border-white/5 rounded-xl p-2.5">
                 <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Reversal Score</span>
-                <span className="text-lg font-mono font-bold text-cyan-400">{selectedSignal.reversalScore}%</span>
+                <span className="text-base font-mono font-bold text-cyan-400">{selectedSignal.reversalScore}%</span>
+              </div>
+              <div className="bg-black/50 border border-emerald-500/20 rounded-xl p-2.5 bg-emerald-500/[0.03]">
+                <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Decizie Finală</span>
+                <span className={`text-base font-mono font-bold ${
+                  selectedSignal.finalAction === 'BUY' ? 'text-emerald-400' : selectedSignal.finalAction === 'SELL' ? 'text-rose-400' : 'text-amber-400'
+                }`}>{selectedSignal.finalAction}</span>
               </div>
             </div>
 
-            <div className="bg-black/60 border border-white/5 rounded-xl p-4 space-y-2">
+            <div className="bg-black/60 border border-white/5 rounded-xl p-3.5 space-y-2">
               <h4 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
                 <ShieldAlert className="w-3.5 h-3.5 text-amber-400" /> Rezultat Confluență & Motiv Veto:
               </h4>
@@ -585,10 +591,12 @@ export function TradeLogs() {
 
             {selectedSignal.explanation && selectedSignal.explanation.length > 0 && (
               <div className="space-y-2">
-                <h4 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Pas cu pas pipeline AI:</h4>
-                <div className="bg-black/40 border border-white/5 rounded-xl p-3 space-y-1.5 font-mono text-[11px] text-zinc-300 max-h-48 overflow-y-auto">
+                <h4 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-cyan-400" /> Pas cu Pas Pipeline AI & Execution Engine:
+                </h4>
+                <div className="bg-black/40 border border-white/5 rounded-xl p-3 space-y-1.5 font-mono text-[11px] text-zinc-300 max-h-52 overflow-y-auto whitespace-pre-line">
                   {selectedSignal.explanation.map((exp, idx) => (
-                    <div key={idx} className="border-b border-white/[0.03] pb-1 last:border-none">
+                    <div key={idx} className="border-b border-white/[0.04] pb-1.5 last:border-none leading-relaxed">
                       {exp}
                     </div>
                   ))}
