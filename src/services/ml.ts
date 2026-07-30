@@ -956,7 +956,7 @@ export class RandomForest {
     if (probBuy > probSell && probBuy >= 38 && probBuy >= probHold * 0.85) {
       value = 1;
       prob = probBuy;
-    } else if (probSell > probBuy && probSell >= 55 && probSell >= probHold) {
+    } else if (probSell > probBuy && probSell >= 38 && probSell >= probHold * 0.85) {
       value = -1;
       prob = probSell;
     }
